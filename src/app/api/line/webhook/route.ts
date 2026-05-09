@@ -89,7 +89,9 @@ async function handleLineEvent(event: LineWebhookEvent) {
     return;
   }
 
-  await handleAction(event, text);
+  if (isCoreTextCommand(text) || isRegistrationText(text) || text.startsWith("pay:")) {
+    await handleAction(event, text);
+  }
 }
 
 async function handleAction(event: LineWebhookEvent, action: string) {
@@ -121,6 +123,11 @@ async function handleAction(event: LineWebhookEvent, action: string) {
       return;
     }
     if (isPlaceholderMenuCommand(normalized)) {
+      const student = await getStudentByLineUserId(event.source.userId);
+      if (!student) {
+        await replyRegisterPrompt(event);
+        return;
+      }
       await replyLineText(event.replyToken, [
         "เมนูนี้กำลังเตรียมใช้งาน",
         "ตอนนี้ใช้เมนูชำระเงินเพื่อดูรายการค้างชำระและส่งสลิปได้ก่อน",
@@ -137,11 +144,6 @@ async function handleAction(event: LineWebhookEvent, action: string) {
       return;
     }
 
-    await replyLineText(event.replyToken, [
-      "พิมพ์เลขที่เพื่อผูกบัญชี LINE กับระบบการเงินห้องเรียน",
-      "ตัวอย่าง: ลงทะเบียน 24",
-      "หรือพิมพ์ ชำระเงิน เพื่อดูรายการค้างชำระ",
-    ].join("\n"));
     return;
   }
 
@@ -192,7 +194,7 @@ async function handleAction(event: LineWebhookEvent, action: string) {
 async function showPayMenu(event: LineWebhookEvent) {
   const student = await getStudentByLineUserId(event.source?.userId);
   if (!student) {
-    await replyLineText(event.replyToken, "กรุณากดเมนูลงทะเบียนหรือพิมพ์เลขที่ของตัวเอง เช่น ลงทะเบียน 24");
+    await replyRegisterPrompt(event);
     return;
   }
 
@@ -361,6 +363,12 @@ async function handleSlipImage(event: LineWebhookEvent, messageId: string) {
 }
 
 async function cancelActivePayment(event: LineWebhookEvent) {
+  const student = await getStudentByLineUserId(event.source?.userId);
+  if (!student) {
+    await replyRegisterPrompt(event);
+    return;
+  }
+
   const activeRequests = (await listRecords<Row>("line_payment_requests"))
     .map(mapLinePaymentRequest)
     .filter((request) =>
@@ -401,6 +409,22 @@ function isRegistrationHelpCommand(text: string) {
 
 function isPlaceholderMenuCommand(text: string) {
   return ["เมนูสถานะ", "สถานะ", "เมนูประวัติ", "ประวัติ"].includes(text.trim());
+}
+
+function isCoreTextCommand(text: string) {
+  return isPayCommand(text) || isCancelCommand(text) || isPlaceholderMenuCommand(text);
+}
+
+function isRegistrationText(text: string) {
+  return isRegistrationHelpCommand(text) || parseRegistrationNumber(text) !== null;
+}
+
+async function replyRegisterPrompt(event: LineWebhookEvent) {
+  await linkLineRichMenuByName(event.source?.userId, REGISTER_RICH_MENU_NAME);
+  await replyLineText(event.replyToken, [
+    "ยังไม่ได้ลงทะเบียนบัญชี LINE กับระบบการเงินห้องเรียน",
+    "กรุณากดเมนูลงทะเบียน แล้วพิมพ์เลขที่ของตัวเอง เช่น ลงทะเบียน 24",
+  ].join("\n"));
 }
 
 async function getStudentByLineUserId(lineUserId: string | undefined) {
