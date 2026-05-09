@@ -31,6 +31,9 @@ type LineWebhookEvent = {
   };
 };
 
+type LineMessage = Record<string, unknown>;
+type LineFlexBox = Record<string, unknown>;
+
 const studentColumns = ["line_user_id"];
 
 export async function GET() {
@@ -88,6 +91,18 @@ async function handleLineEvent(event: LineWebhookEvent) {
     await cancelActivePayment(event);
     return;
   }
+  if (isStatusCommand(text)) {
+    await showStudentStatus(event);
+    return;
+  }
+  if (isHistoryCommand(text)) {
+    await showStudentHistory(event);
+    return;
+  }
+  if (isTotalCommand(text)) {
+    await showClassroomTotal(event);
+    return;
+  }
 
   if (isCoreTextCommand(text) || isRegistrationText(text) || text.startsWith("pay:")) {
     await handleAction(event, text);
@@ -111,7 +126,7 @@ async function handleAction(event: LineWebhookEvent, action: string) {
           `${registeredStudent.prefix} ${registeredStudent.first_name} ${registeredStudent.last_name}`,
           `เลขที่ ${registeredStudent.number}`,
           "",
-          menuLink.ok ? "เมนูถูกเปลี่ยนเป็น ชำระเงิน / สถานะ / ประวัติ แล้วครับ" : "ยังเปลี่ยนเมนูไม่ได้ กรุณาให้เหรัญญิกรันตั้งค่า Rich Menu อีกครั้งนะครับ",
+          menuLink.ok ? "เมนูถูกเปลี่ยนเป็น ชำระเงิน / สถานะ / ประวัติ / ยอดรวม แล้วครับ" : "ยังเปลี่ยนเมนูไม่ได้ กรุณาให้เหรัญญิกรันตั้งค่า Rich Menu อีกครั้งนะครับ",
           "ถ้าต้องการเปลี่ยนเป็นคนอื่น ต้องให้เหรัญญิกลบ LINE User ID ในระบบก่อนนะครับ",
         ].join("\n"));
         return;
@@ -125,20 +140,6 @@ async function handleAction(event: LineWebhookEvent, action: string) {
         "ลงทะเบียน 24",
         "",
         "พอลงทะเบียนเสร็จ จะกดเมนู ชำระเงิน ต่อได้ทันทีครับ 🚀",
-      ].join("\n"));
-      return;
-    }
-    if (isPlaceholderMenuCommand(normalized)) {
-      const student = await getStudentByLineUserId(event.source.userId);
-      if (!student) {
-        await replyRegisterPrompt(event);
-        return;
-      }
-      await replyLineText(event.replyToken, [
-        "เมนูนี้กำลังอยู่ระหว่างเตรียมเปิดใช้งานครับ 🚧",
-        "ทีมงานกำลังปั้นอยู่ ยังไม่สุกดี",
-        "",
-        "ตอนนี้ใช้เมนู ชำระเงิน เพื่อดูรายการค้างชำระและส่งสลิปไปก่อนได้เลยครับ 💸",
       ].join("\n"));
       return;
     }
@@ -168,7 +169,7 @@ async function handleAction(event: LineWebhookEvent, action: string) {
       `${registeredStudent.prefix} ${registeredStudent.first_name} ${registeredStudent.last_name}`,
       `เลขที่ ${registeredStudent.number}`,
       "",
-      menuLink.ok ? (isSameNumber ? "กดเมนู ชำระเงิน ใช้งานต่อได้เลยครับ 💸" : "เมนูถูกเปลี่ยนเป็น ชำระเงิน / สถานะ / ประวัติ แล้วครับ") : "ยังเปลี่ยนเมนูไม่ได้ กรุณาให้เหรัญญิกรันตั้งค่า Rich Menu อีกครั้งนะครับ",
+      menuLink.ok ? (isSameNumber ? "กดเมนู ชำระเงิน ใช้งานต่อได้เลยครับ 💸" : "เมนูถูกเปลี่ยนเป็น ชำระเงิน / สถานะ / ประวัติ / ยอดรวม แล้วครับ") : "ยังเปลี่ยนเมนูไม่ได้ กรุณาให้เหรัญญิกรันตั้งค่า Rich Menu อีกครั้งนะครับ",
       isSameNumber
         ? ""
         : "เพื่อความปลอดภัย บัญชี LINE เดียวจะเปลี่ยนไปเป็นคนอื่นเองไม่ได้ครับ 🔐\nถ้าต้องการเปลี่ยนจริง ๆ ให้เหรัญญิกลบ LINE User ID ในระบบก่อนนะครับ",
@@ -212,7 +213,7 @@ async function handleAction(event: LineWebhookEvent, action: string) {
     `เลขที่ ${student.number}${student.nick_name ? ` (${student.nick_name})` : ""}`,
     "",
     menuLink.ok
-      ? "เปลี่ยนเมนูเป็น ชำระเงิน / สถานะ / ประวัติ ให้เรียบร้อยแล้วครับ"
+      ? "เปลี่ยนเมนูเป็น ชำระเงิน / สถานะ / ประวัติ / ยอดรวม ให้เรียบร้อยแล้วครับ"
       : "รบกวนให้เหรัญญิกช่วยรันตั้งค่า Rich Menu อีกครั้งนะครับ",
     menuLink.ok
       ? "ต่อไปแจ้งเตือนเรื่องชำระเงินจะส่งมาที่บัญชีนี้นะครับ 🔔"
@@ -467,6 +468,371 @@ async function cancelActivePayment(event: LineWebhookEvent) {
   ].join("\n"));
 }
 
+async function showStudentStatus(event: LineWebhookEvent) {
+  const student = await getStudentByLineUserId(event.source?.userId);
+  if (!student) {
+    await replyRegisterPrompt(event);
+    return;
+  }
+
+  const overview = await getStudentPaymentOverview(student.id);
+  const totalDebt = overview.debts.reduce((sum, debt) => sum + debt.remaining, 0);
+  const altText = totalDebt > 0
+    ? `สถานะของคุณ: ค้าง ${formatBaht(totalDebt)} จาก ${overview.debts.length} รายการ`
+    : "สถานะของคุณ: ไม่มีรายการค้างชำระ";
+
+  const message = createFlexMessage(altText, createStudentStatusBubble(student, overview));
+  if (overview.debts.length > 0) {
+    message.quickReply = {
+      items: [quickMessage("ชำระเงิน", "ชำระเงิน")],
+    };
+  }
+
+  await replyLineMessages(event.replyToken, [message]);
+}
+
+async function showStudentHistory(event: LineWebhookEvent) {
+  const student = await getStudentByLineUserId(event.source?.userId);
+  if (!student) {
+    await replyRegisterPrompt(event);
+    return;
+  }
+
+  const [scheduleRows, transactionRows] = await Promise.all([
+    listRecords<Row>("schedules"),
+    listRecords<Row>("transactions"),
+  ]);
+  const scheduleById = new Map(scheduleRows.map((row) => {
+    const schedule = mapSchedule(row);
+    return [schedule.id, schedule];
+  }));
+  const transactions = transactionRows
+    .map(mapTransaction)
+    .filter((transaction) => transaction.source === "schedule" && transaction.kind === "income" && transaction.student_id === student.id)
+    .sort((a, b) => b.created_at.localeCompare(a.created_at));
+
+  await replyLineMessages(event.replyToken, [
+    createFlexMessage(
+      transactions.length > 0 ? `ประวัติการชำระเงิน ${transactions.length} รายการ` : "ยังไม่มีประวัติการชำระเงิน",
+      createStudentHistoryBubble(student, transactions, scheduleById)
+    ),
+  ]);
+}
+
+async function showClassroomTotal(event: LineWebhookEvent) {
+  const student = await getStudentByLineUserId(event.source?.userId);
+  if (!student) {
+    await replyRegisterPrompt(event);
+    return;
+  }
+
+  const transactions = (await listRecords<Row>("transactions")).map(mapTransaction);
+  const summary = calculateClassroomMoneySummary(transactions);
+
+  await replyLineMessages(event.replyToken, [
+    createFlexMessage(
+      `ยอดเงินห้องรวม ${formatBaht(summary.total)}`,
+      createClassroomTotalBubble(summary)
+    ),
+  ]);
+}
+
+async function getStudentPaymentOverview(studentId: string) {
+  const [scheduleRows, transactionRows] = await Promise.all([
+    listRecords<Row>("schedules"),
+    listRecords<Row>("transactions"),
+  ]);
+  const schedules = scheduleRows.map(mapSchedule).filter((schedule) => schedule.student_ids.includes(studentId));
+  const transactions = transactionRows.map(mapTransaction);
+
+  const items = schedules
+    .map((schedule) => {
+      const paid = transactions
+        .filter((transaction) => transaction.source === "schedule" && transaction.kind === "income" && transaction.schedule_id === schedule.id && transaction.student_id === studentId)
+        .reduce((sum, transaction) => sum + transaction.amount, 0);
+      return {
+        schedule,
+        paid,
+        remaining: Math.max(0, Math.round((schedule.amount_per_item - paid) * 100) / 100),
+      };
+    })
+    .sort((a, b) => String(a.schedule.end_date || a.schedule.start_date).localeCompare(String(b.schedule.end_date || b.schedule.start_date)));
+
+  return {
+    totalSchedules: items.length,
+    paidSchedules: items.filter((item) => item.remaining <= 0),
+    debts: items.filter((item) => item.remaining > 0),
+  };
+}
+
+function calculateClassroomMoneySummary(transactions: ReturnType<typeof mapTransaction>[]) {
+  const summary = {
+    total: 0,
+    income: 0,
+    expense: 0,
+    kplus: 0,
+    cash: 0,
+    truemoney: 0,
+  };
+
+  for (const transaction of transactions) {
+    if (transaction.kind === "income") {
+      summary.income += transaction.amount;
+      summary.total += transaction.amount;
+      addMethodAmount(summary, normalizeTransactionMethod(transaction), transaction.amount);
+    } else if (transaction.kind === "expense") {
+      summary.expense += transaction.amount;
+      summary.total -= transaction.amount;
+      addMethodAmount(summary, normalizeTransactionMethod(transaction), -transaction.amount);
+    } else if (transaction.kind === "transfer") {
+      addMethodAmount(summary, methodFromPocketId(transaction.source_pocket_id), -transaction.amount);
+      addMethodAmount(summary, methodFromPocketId(transaction.destination_pocket_id), transaction.amount);
+    }
+  }
+
+  return summary;
+}
+
+function addMethodAmount(
+  summary: { kplus: number; cash: number; truemoney: number },
+  method: string | undefined,
+  amount: number
+) {
+  if (method === "kplus") summary.kplus += amount;
+  if (method === "cash") summary.cash += amount;
+  if (method === "truemoney") summary.truemoney += amount;
+}
+
+function methodFromPocketId(pocketId: string | undefined) {
+  if (pocketId === "pocket-kplus") return "kplus";
+  if (pocketId === "pocket-cash") return "cash";
+  if (pocketId === "pocket-truemoney") return "truemoney";
+  return undefined;
+}
+
+function normalizeTransactionMethod(transaction: ReturnType<typeof mapTransaction>) {
+  return transaction.method === "kplus" || transaction.method === "cash" || transaction.method === "truemoney"
+    ? transaction.method
+    : methodFromPocketId(transaction.pocket_id);
+}
+
+function createStudentStatusBubble(student: ReturnType<typeof mapStudent>, overview: Awaited<ReturnType<typeof getStudentPaymentOverview>>) {
+  const totalDebt = overview.debts.reduce((sum, debt) => sum + debt.remaining, 0);
+  const bodyContents: LineFlexBox[] = [
+    flexHeader("สถานะการชำระเงิน", `${student.prefix} ${student.first_name} ${student.last_name}`),
+    flexText(`เลขที่ ${student.number}${student.nick_name ? ` (${student.nick_name})` : ""}`, "#6B7280", "sm"),
+    flexSeparator(),
+    {
+      type: "box",
+      layout: "horizontal",
+      spacing: "sm",
+      contents: [
+        metricBox("ยอดค้าง", formatBaht(totalDebt), "#DC2626", "#FEF2F2"),
+        metricBox("ค้าง", `${overview.debts.length} รายการ`, "#EA580C", "#FFF7ED"),
+        metricBox("จ่ายแล้ว", `${overview.paidSchedules.length}/${overview.totalSchedules}`, "#059669", "#ECFDF5"),
+      ],
+    },
+  ];
+
+  if (overview.debts.length === 0) {
+    bodyContents.push(emptyStateBox("ไม่มีรายการค้างชำระครับ ✅", "กระเป๋าสตางค์รอดแล้ววันนี้"));
+  } else {
+    bodyContents.push(flexSectionTitle("รายการค้างชำระ"));
+    bodyContents.push(...overview.debts.slice(0, 8).map((debt) => paymentStatusRow(debt.schedule.name, debt.remaining, debt.schedule.end_date || debt.schedule.start_date, "#DC2626")));
+    if (overview.debts.length > 8) {
+      bodyContents.push(flexText(`และอีก ${overview.debts.length - 8} รายการ`, "#6B7280", "xs"));
+    }
+  }
+
+  return flexBubble(bodyContents);
+}
+
+function createStudentHistoryBubble(
+  student: ReturnType<typeof mapStudent>,
+  transactions: ReturnType<typeof mapTransaction>[],
+  scheduleById: Map<string, ReturnType<typeof mapSchedule>>
+) {
+  const totalPaid = transactions.reduce((sum, transaction) => sum + transaction.amount, 0);
+  const bodyContents: LineFlexBox[] = [
+    flexHeader("ประวัติการชำระเงิน", `${student.prefix} ${student.first_name} ${student.last_name}`),
+    flexText(`เลขที่ ${student.number}${student.nick_name ? ` (${student.nick_name})` : ""}`, "#6B7280", "sm"),
+    flexSeparator(),
+    {
+      type: "box",
+      layout: "horizontal",
+      spacing: "sm",
+      contents: [
+        metricBox("รวมที่จ่าย", formatBaht(totalPaid), "#2563EB", "#EFF6FF"),
+        metricBox("จำนวน", `${transactions.length} รายการ`, "#0891B2", "#ECFEFF"),
+      ],
+    },
+  ];
+
+  if (transactions.length === 0) {
+    bodyContents.push(emptyStateBox("ยังไม่มีประวัติการชำระเงินครับ", "เมื่อเหรัญญิกอนุมัติแล้ว รายการจะแสดงตรงนี้"));
+  } else {
+    bodyContents.push(flexSectionTitle("ล่าสุด"));
+    bodyContents.push(...transactions.slice(0, 10).map((transaction) => {
+      const scheduleName = transaction.schedule_id ? scheduleById.get(transaction.schedule_id)?.name : undefined;
+      return historyRow(scheduleName || transaction.name, transaction.amount, transaction.method, transaction.created_at);
+    }));
+  }
+
+  return flexBubble(bodyContents);
+}
+
+function createClassroomTotalBubble(summary: ReturnType<typeof calculateClassroomMoneySummary>) {
+  return flexBubble([
+    flexHeader("ยอดเงินห้องเรียน", "ภาพรวมเงินทั้งหมดของห้อง"),
+    flexSeparator(),
+    metricBox("ยอดคงเหลือรวม", formatBaht(summary.total), "#2563EB", "#EFF6FF", "xxl"),
+    {
+      type: "box",
+      layout: "horizontal",
+      spacing: "sm",
+      contents: [
+        metricBox("K PLUS", formatBaht(summary.kplus), "#059669", "#ECFDF5"),
+        metricBox("Cash", formatBaht(summary.cash), "#2563EB", "#EFF6FF"),
+      ],
+    },
+    {
+      type: "box",
+      layout: "horizontal",
+      spacing: "sm",
+      contents: [
+        metricBox("TrueMoney", formatBaht(summary.truemoney), "#EA580C", "#FFF7ED"),
+        metricBox("รายจ่าย", formatBaht(summary.expense), "#DC2626", "#FEF2F2"),
+      ],
+    },
+    metricBox("รายรับทั้งหมด", formatBaht(summary.income), "#0891B2", "#ECFEFF"),
+    flexText(`อัปเดต: ${formatDateTimeThai(new Date().toISOString())}`, "#9CA3AF", "xs"),
+  ]);
+}
+
+function createFlexMessage(altText: string, bubble: LineFlexBox): LineMessage {
+  return {
+    type: "flex",
+    altText: truncateLabel(altText, 390),
+    contents: bubble,
+  };
+}
+
+function flexBubble(bodyContents: LineFlexBox[]): LineFlexBox {
+  return {
+    type: "bubble",
+    size: "mega",
+    body: {
+      type: "box",
+      layout: "vertical",
+      spacing: "md",
+      paddingAll: "18px",
+      contents: bodyContents,
+    },
+  };
+}
+
+function flexHeader(title: string, subtitle: string): LineFlexBox {
+  return {
+    type: "box",
+    layout: "vertical",
+    spacing: "xs",
+    contents: [
+      { type: "text", text: title, weight: "bold", size: "xl", color: "#111827" },
+      { type: "text", text: subtitle, size: "sm", color: "#4B5563", wrap: true },
+    ],
+  };
+}
+
+function metricBox(label: string, value: string, color: string, backgroundColor: string, size = "lg"): LineFlexBox {
+  return {
+    type: "box",
+    layout: "vertical",
+    flex: 1,
+    paddingAll: "12px",
+    cornerRadius: "16px",
+    backgroundColor,
+    contents: [
+      { type: "text", text: label, size: "xs", color: "#6B7280", wrap: true },
+      { type: "text", text: value, size, weight: "bold", color, wrap: true },
+    ],
+  };
+}
+
+function paymentStatusRow(name: string, amount: number, dueDate: string | undefined, color: string): LineFlexBox {
+  return {
+    type: "box",
+    layout: "horizontal",
+    spacing: "md",
+    paddingAll: "10px",
+    cornerRadius: "14px",
+    borderWidth: "1px",
+    borderColor: "#E5E7EB",
+    contents: [
+      {
+        type: "box",
+        layout: "vertical",
+        flex: 1,
+        contents: [
+          { type: "text", text: name, size: "sm", weight: "bold", color: "#111827", wrap: true },
+          { type: "text", text: `ครบกำหนด: ${formatDateThai(dueDate)}`, size: "xs", color: "#6B7280", wrap: true },
+        ],
+      },
+      { type: "text", text: formatBaht(amount), size: "sm", weight: "bold", color, align: "end", flex: 0 },
+    ],
+  };
+}
+
+function historyRow(name: string, amount: number, method: string | undefined, createdAt: string): LineFlexBox {
+  return {
+    type: "box",
+    layout: "vertical",
+    spacing: "xs",
+    paddingAll: "10px",
+    cornerRadius: "14px",
+    borderWidth: "1px",
+    borderColor: "#E5E7EB",
+    contents: [
+      {
+        type: "box",
+        layout: "horizontal",
+        spacing: "md",
+        contents: [
+          { type: "text", text: name, size: "sm", weight: "bold", color: "#111827", wrap: true, flex: 1 },
+          { type: "text", text: formatBaht(amount), size: "sm", weight: "bold", color: "#059669", align: "end", flex: 0 },
+        ],
+      },
+      { type: "text", text: `${formatMethod(method)} • ${formatDateTimeThai(createdAt)}`, size: "xs", color: "#6B7280", wrap: true },
+    ],
+  };
+}
+
+function flexSectionTitle(text: string): LineFlexBox {
+  return { type: "text", text, weight: "bold", size: "md", color: "#111827", margin: "md" };
+}
+
+function flexText(text: string, color: string, size: string): LineFlexBox {
+  return { type: "text", text, color, size, wrap: true };
+}
+
+function flexSeparator(): LineFlexBox {
+  return { type: "separator", color: "#E5E7EB" };
+}
+
+function emptyStateBox(title: string, subtitle: string): LineFlexBox {
+  return {
+    type: "box",
+    layout: "vertical",
+    spacing: "xs",
+    paddingAll: "16px",
+    cornerRadius: "18px",
+    backgroundColor: "#F8FAFC",
+    contents: [
+      { type: "text", text: title, weight: "bold", size: "md", color: "#111827", align: "center", wrap: true },
+      { type: "text", text: subtitle, size: "sm", color: "#6B7280", align: "center", wrap: true },
+    ],
+  };
+}
+
 function parseRegistrationNumber(text: string) {
   const normalized = text.replace(/\s+/g, " ").trim();
   const match = normalized.match(/^(?:ลงทะเบียน)?\s*(\d{1,3})$/i);
@@ -487,12 +853,20 @@ function isRegistrationHelpCommand(text: string) {
   return ["ลงทะเบียน"].includes(text.trim());
 }
 
-function isPlaceholderMenuCommand(text: string) {
-  return ["เมนูสถานะ", "สถานะ", "เมนูประวัติ", "ประวัติ"].includes(text.trim());
+function isStatusCommand(text: string) {
+  return ["เมนูสถานะ", "สถานะ", "STATUS_MENU"].includes(text.trim());
+}
+
+function isHistoryCommand(text: string) {
+  return ["เมนูประวัติ", "ประวัติ", "HISTORY_MENU"].includes(text.trim());
+}
+
+function isTotalCommand(text: string) {
+  return ["เมนูยอดรวม", "ยอดรวม", "TOTAL_MENU"].includes(text.trim());
 }
 
 function isCoreTextCommand(text: string) {
-  return isPayCommand(text) || isCancelCommand(text) || isPlaceholderMenuCommand(text);
+  return isPayCommand(text) || isCancelCommand(text) || isStatusCommand(text) || isHistoryCommand(text) || isTotalCommand(text);
 }
 
 function isRegistrationText(text: string) {
@@ -565,6 +939,40 @@ function quickMessage(label: string, text: string) {
 
 function truncateLabel(label: string, maxLength: number) {
   return label.length > maxLength ? `${label.slice(0, maxLength - 1)}…` : label;
+}
+
+function formatBaht(amount: number) {
+  return `${amount.toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ฿`;
+}
+
+function formatMethod(method: string | undefined) {
+  if (method === "kplus") return "K PLUS";
+  if (method === "cash") return "เงินสด";
+  if (method === "truemoney") return "TrueMoney";
+  return "ไม่ระบุช่องทาง";
+}
+
+function formatDateThai(value: string | undefined) {
+  if (!value) return "ยังไม่ระบุ";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "ยังไม่ระบุ";
+  return date.toLocaleDateString("th-TH", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  });
+}
+
+function formatDateTimeThai(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString("th-TH", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 function isValidLineSignature(bodyText: string, signature: string, channelSecret: string) {

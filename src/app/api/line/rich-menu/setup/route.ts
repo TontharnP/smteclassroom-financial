@@ -42,16 +42,20 @@ const richMenus: RichMenuDefinition[] = [
     imagePath: join(process.cwd(), "public/line/rich-menu-registered.png"),
     areas: [
       {
-        bounds: { x: 0, y: 0, width: 400, height: RICH_MENU_SIZE.height },
+        bounds: { x: 0, y: 0, width: 300, height: RICH_MENU_SIZE.height },
         action: { type: "message", label: "ชำระเงิน", text: "ชำระเงิน" },
       },
       {
-        bounds: { x: 400, y: 0, width: 400, height: RICH_MENU_SIZE.height },
+        bounds: { x: 300, y: 0, width: 300, height: RICH_MENU_SIZE.height },
         action: { type: "message", label: "สถานะ", text: "เมนูสถานะ" },
       },
       {
-        bounds: { x: 800, y: 0, width: 400, height: RICH_MENU_SIZE.height },
+        bounds: { x: 600, y: 0, width: 300, height: RICH_MENU_SIZE.height },
         action: { type: "message", label: "ประวัติ", text: "เมนูประวัติ" },
+      },
+      {
+        bounds: { x: 900, y: 0, width: 300, height: RICH_MENU_SIZE.height },
+        action: { type: "message", label: "ยอดรวม", text: "เมนูยอดรวม" },
       },
     ],
   },
