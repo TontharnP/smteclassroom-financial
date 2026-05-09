@@ -81,8 +81,8 @@ export function ScheduleCalendar({ onScheduleClick }: ScheduleCalendarProps) {
   };
 
   return (
-    <div className="grid min-h-0 gap-3 lg:grid-cols-[minmax(0,1fr)_18rem]">
-      <div className="calendar-wrapper min-w-0">
+    <div className="grid min-h-0 gap-4">
+      <div className="calendar-wrapper mx-auto w-full max-w-xl min-w-0">
         <Calendar
           onChange={handleDateChange}
           value={selectedDate}
@@ -142,23 +142,25 @@ export function ScheduleCalendar({ onScheduleClick }: ScheduleCalendarProps) {
           </AnimatePresence>
         </div>
 
-        <ScheduleStatusPanel
-          title="ใกล้ครบกำหนด"
-          icon={<Clock3 className="h-4 w-4 text-amber-600" />}
-          schedules={upcomingSchedules}
-          scheduleStatus={scheduleStatus}
-          emptyText="ยังไม่มีกำหนดการใกล้ครบกำหนด"
-          onScheduleClick={onScheduleClick}
-        />
+        <div className="grid gap-3 2xl:grid-cols-2">
+          <ScheduleStatusPanel
+            title="ใกล้ครบกำหนด"
+            icon={<Clock3 className="h-4 w-4 text-amber-600" />}
+            schedules={upcomingSchedules}
+            scheduleStatus={scheduleStatus}
+            emptyText="ยังไม่มีกำหนดการใกล้ครบกำหนด"
+            onScheduleClick={onScheduleClick}
+          />
 
-        <ScheduleStatusPanel
-          title="เลยกำหนด"
-          icon={<AlertTriangle className="h-4 w-4 text-rose-600" />}
-          schedules={overdueSchedules}
-          scheduleStatus={scheduleStatus}
-          emptyText="ไม่มีรายการเลยกำหนด"
-          onScheduleClick={onScheduleClick}
-        />
+          <ScheduleStatusPanel
+            title="เลยกำหนด"
+            icon={<AlertTriangle className="h-4 w-4 text-rose-600" />}
+            schedules={overdueSchedules}
+            scheduleStatus={scheduleStatus}
+            emptyText="ไม่มีรายการเลยกำหนด"
+            onScheduleClick={onScheduleClick}
+          />
+        </div>
       </div>
     </div>
   );
