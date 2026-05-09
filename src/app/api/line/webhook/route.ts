@@ -343,7 +343,7 @@ async function handleScheduleSelection(event: LineWebhookEvent, scheduleId: stri
     status: "selecting",
   });
 
-  const quickItems = [
+  const quickItems: any[] = [
     quickPostback(
       truncateLabel(`จ่ายเต็ม ${formatBaht(debt.remaining)}`, 20),
       `pay:amount:${request.id}:${debt.remaining}`
