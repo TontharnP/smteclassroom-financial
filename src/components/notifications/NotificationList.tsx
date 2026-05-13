@@ -75,7 +75,7 @@ export function NotificationList() {
       {requests.map((req) => {
         const student = students.find((s) => s.id === req.student_id);
         const schedule = schedules.find((s) => s.id === req.schedule_id);
-        const studentName = student ? `${student.prefix || ""}${student.first_name} ${student.last_name}` : "ไม่พบนักเรียน";
+        const studentName = student ? `${student.prefix || ""}${student.firstName} ${student.lastName}` : "ไม่พบนักเรียน";
         const scheduleName = schedule?.name || "ไม่พบกำหนดการ";
         const isProcessing = processingId === req.id;
 
