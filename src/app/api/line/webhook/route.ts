@@ -281,20 +281,6 @@ async function showPayMenu(event: LineWebhookEvent) {
     `มีรายการค้างชำระ ${debts.length} รายการ`,
     createPayMenuBubble(student, debts)
   );
-  message.quickReply = {
-    items: [
-      ...debts.slice(0, 12).map(({ schedule, remaining }) => ({
-        type: "action",
-        action: {
-          type: "postback",
-          label: truncateLabel(`${schedule.name} ${remaining.toLocaleString()}฿`, 20),
-          data: `pay:schedule:${schedule.id}`,
-          displayText: `ชำระ ${schedule.name}`,
-        },
-      })),
-      quickMessage("ยกเลิก", "ยกเลิก"),
-    ],
-  };
 
   await replyLineMessages(event.replyToken, [
     message,
@@ -344,28 +330,10 @@ async function handleScheduleSelection(event: LineWebhookEvent, scheduleId: stri
     status: "selecting",
   });
 
-  const quickItems: Array<ReturnType<typeof quickPostback> | ReturnType<typeof quickMessage>> = [
-    quickPostback(
-      truncateLabel(`จ่ายเต็ม ${formatBaht(debt.remaining)}`, 20),
-      `pay:amount:${request.id}:${debt.remaining}`
-    ),
-  ];
-  if (debt.remaining > 20) {
-    const half = Math.round(debt.remaining / 2 * 100) / 100;
-    quickItems.push(
-      quickPostback(
-        truncateLabel(`ครึ่งหนึ่ง ${formatBaht(half)}`, 20),
-        `pay:amount:${request.id}:${half}`
-      )
-    );
-  }
-  quickItems.push(quickMessage("ยกเลิก", "ยกเลิก"));
-
   const message = createFlexMessage(
     `เลือกจำนวนเงิน ${debt.schedule.name}`,
-    createAmountSelectionBubble(debt.schedule.name, debt.remaining)
+    createAmountSelectionBubble(String(request.id), debt.schedule.name, debt.remaining)
   );
-  message.quickReply = { items: quickItems };
 
   await replyLineMessages(event.replyToken, [message]);
 }
@@ -417,16 +385,8 @@ async function handleAmountSelection(event: LineWebhookEvent, requestId: string,
 
   const message = createFlexMessage(
     `เลือกวิธีชำระเงิน ${scheduleName}`,
-    createPaymentMethodBubble(scheduleName, roundedAmount)
+    createPaymentMethodBubble(request.id, scheduleName, roundedAmount)
   );
-  message.quickReply = {
-    items: [
-      quickPostback("K PLUS", `pay:method:${request.id}:kplus`),
-      quickPostback("TrueMoney", `pay:method:${request.id}:truemoney`),
-      quickPostback("เงินสด", `pay:method:${request.id}:cash`),
-      quickMessage("ยกเลิก", "ยกเลิก"),
-    ],
-  };
 
   await replyLineMessages(event.replyToken, [message]);
 }
@@ -454,33 +414,56 @@ function createPayMenuBubble(
   if (debts.length === 0) {
     bodyContents.push(emptyStateBox("ตอนนี้ไม่มีรายการค้างชำระครับ ✅", "กระเป๋าสตางค์รอดแล้ววันนี้"));
   } else {
-    bodyContents.push(flexSectionTitle("เลือกรายการจากปุ่มด้านล่าง"));
-    bodyContents.push(...debts.slice(0, 8).map((debt) => paymentStatusRow(debt.schedule.name, debt.remaining, debt.schedule.end_date || debt.schedule.start_date, "#DC2626")));
+    bodyContents.push(flexSectionTitle("แตะเลือกรายการที่ต้องการจ่าย"));
+    bodyContents.push(...debts.slice(0, 8).map((debt) =>
+      paymentDebtButton(
+        debt.schedule.name,
+        debt.remaining,
+        debt.schedule.end_date || debt.schedule.start_date,
+        `pay:schedule:${debt.schedule.id}`
+      )
+    ));
     if (debts.length > 8) {
       bodyContents.push(flexText(`และอีก ${debts.length - 8} รายการ`, "#6B7280", "xs"));
     }
+    bodyContents.push(flexButton("ยกเลิก", { type: "message", label: "ยกเลิก", text: "ยกเลิก" }, "secondary", "#6B7280"));
   }
 
   return flexBubble(bodyContents);
 }
 
-function createAmountSelectionBubble(scheduleName: string, remaining: number) {
-  return flexBubble([
+function createAmountSelectionBubble(requestId: string, scheduleName: string, remaining: number) {
+  const half = Math.round(remaining / 2 * 100) / 100;
+  const bodyContents: LineFlexBox[] = [
     flexHeader("เลือกจำนวนเงิน", scheduleName),
     flexSeparator(),
     metricBox("ยอดค้างทั้งหมด", formatBaht(remaining), "#2563EB", "#EFF6FF", "xxl"),
-    flexText("เลือกจำนวนจากปุ่มด้านล่าง หรือพิมพ์จำนวนเงินเอง", "#374151", "sm"),
+    flexText("แตะปุ่มจำนวนเงินที่ต้องการจ่าย หรือพิมพ์จำนวนเงินเอง", "#374151", "sm"),
     flexText("เช่น 50 หรือ 100.50", "#6B7280", "xs"),
-  ]);
+    flexButton(`จ่ายเต็ม ${formatBaht(remaining)}`, { type: "postback", label: "จ่ายเต็ม", data: `pay:amount:${requestId}:${remaining}`, displayText: `จ่ายเต็ม ${formatBaht(remaining)}` }, "primary", "#2563EB"),
+  ];
+
+  if (remaining > 20) {
+    bodyContents.push(
+      flexButton(`จ่ายครึ่งหนึ่ง ${formatBaht(half)}`, { type: "postback", label: "จ่ายครึ่งหนึ่ง", data: `pay:amount:${requestId}:${half}`, displayText: `จ่ายครึ่งหนึ่ง ${formatBaht(half)}` }, "secondary", "#0891B2")
+    );
+  }
+
+  bodyContents.push(flexButton("ยกเลิก", { type: "message", label: "ยกเลิก", text: "ยกเลิก" }, "secondary", "#6B7280"));
+  return flexBubble(bodyContents);
 }
 
-function createPaymentMethodBubble(scheduleName: string, amount: number) {
+function createPaymentMethodBubble(requestId: string, scheduleName: string, amount: number) {
   return flexBubble([
     flexHeader("เลือกวิธีชำระเงิน", scheduleName),
     flexSeparator(),
     metricBox("ยอดค้าง", formatBaht(amount), "#2563EB", "#EFF6FF", "xxl"),
-    flexText("เลือก K PLUS, TrueMoney หรือเงินสดจากปุ่มด้านล่างได้เลยครับ", "#374151", "sm"),
+    flexText("แตะเลือกช่องทางชำระเงินจากปุ่มใหญ่ด้านล่างได้เลยครับ", "#374151", "sm"),
     flexText("ถ้าเลือกโอนหรือวอลเล็ต ระบบจะส่ง QR พร้อมยอดเงินคงที่ให้สแกน", "#6B7280", "xs"),
+    flexButton("K PLUS / โอนธนาคาร", { type: "postback", label: "K PLUS", data: `pay:method:${requestId}:kplus`, displayText: "เลือก K PLUS" }, "primary", "#059669"),
+    flexButton("TrueMoney Wallet", { type: "postback", label: "TrueMoney", data: `pay:method:${requestId}:truemoney`, displayText: "เลือก TrueMoney" }, "primary", "#EA580C"),
+    flexButton("เงินสด", { type: "postback", label: "เงินสด", data: `pay:method:${requestId}:cash`, displayText: "เลือกเงินสด" }, "secondary", "#2563EB"),
+    flexButton("ยกเลิก", { type: "message", label: "ยกเลิก", text: "ยกเลิก" }, "secondary", "#6B7280"),
   ]);
 }
 
@@ -1002,6 +985,38 @@ function paymentStatusRow(name: string, amount: number, dueDate: string | undefi
   };
 }
 
+function paymentDebtButton(name: string, amount: number, dueDate: string | undefined, data: string): LineFlexBox {
+  return {
+    type: "box",
+    layout: "vertical",
+    spacing: "sm",
+    paddingAll: "14px",
+    cornerRadius: "16px",
+    borderWidth: "1px",
+    borderColor: "#BFDBFE",
+    backgroundColor: "#EFF6FF",
+    action: {
+      type: "postback",
+      label: truncateLabel(`ชำระ ${name}`, 40),
+      data,
+      displayText: `ชำระ ${name}`,
+    },
+    contents: [
+      { type: "text", text: name, size: "md", weight: "bold", color: "#111827", wrap: true },
+      {
+        type: "box",
+        layout: "horizontal",
+        spacing: "sm",
+        contents: [
+          { type: "text", text: `ครบกำหนด: ${formatDateThai(dueDate)}`, size: "xs", color: "#6B7280", wrap: true, flex: 1 },
+          { type: "text", text: formatBaht(amount), size: "sm", weight: "bold", color: "#DC2626", align: "end", flex: 0 },
+        ],
+      },
+      { type: "text", text: "แตะเพื่อเลือกจ่ายรายการนี้", size: "xs", color: "#2563EB", weight: "bold", wrap: true },
+    ],
+  };
+}
+
 function historyRow(name: string, amount: number, method: string | undefined, createdAt: string): LineFlexBox {
   return {
     type: "box",
@@ -1036,6 +1051,25 @@ function flexText(text: string, color: string, size: string): LineFlexBox {
 
 function flexSeparator(): LineFlexBox {
   return { type: "separator", color: "#E5E7EB" };
+}
+
+function flexButton(
+  text: string,
+  action: Record<string, unknown>,
+  style: "primary" | "secondary",
+  color: string
+): LineFlexBox {
+  return {
+    type: "button",
+    style,
+    height: "md",
+    color,
+    margin: "sm",
+    action: {
+      ...action,
+      label: truncateLabel(text, 40),
+    },
+  };
 }
 
 function emptyStateBox(title: string, subtitle: string): LineFlexBox {
@@ -1132,18 +1166,6 @@ async function getUnpaidSchedulesForStudent(studentId: string) {
     })
     .filter((item) => item.remaining > 0)
     .sort((a, b) => String(a.schedule.end_date || a.schedule.start_date).localeCompare(String(b.schedule.end_date || b.schedule.start_date)));
-}
-
-function quickPostback(label: string, data: string) {
-  return {
-    type: "action",
-    action: {
-      type: "postback",
-      label,
-      data,
-      displayText: label,
-    },
-  };
 }
 
 function quickMessage(label: string, text: string) {
