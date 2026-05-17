@@ -194,6 +194,9 @@ SLIP_RECEIVER_ACCOUNT_NAME=your-receiver-account-name
 SLIP_RECEIVER_ACCOUNT_NUMBER=your-main-receiver-account
 SLIP_RECEIVER_ACCOUNT_NUMBERS=optional,comma,separated,extra,accounts
 TRUEMONEY_RECEIVER_ACCOUNT_NUMBER=optional-truemoney-receiver-number
+TRUEMONEY_RECEIVER_ACCOUNT_NUMBERS=optional,comma,separated,trumoney,receiver,numbers
+TRUEMONEY_RECEIVER_ACCOUNT_NAME=optional-truemoney-receiver-name
+TRUEMONEY_AUTO_REJECT_RECEIVER_MISMATCH=false
 ```
 
 General uploads:
@@ -208,7 +211,11 @@ BLOB_READ_WRITE_TOKEN=vercel_blob_rw_...
 
 `SLIP_RECEIVER_ACCOUNT_NUMBERS` is for additional bank receiver accounts. Use comma-separated values.
 
-`TRUEMONEY_RECEIVER_ACCOUNT_NUMBER` is included only when the selected LINE payment method is `truemoney`.
+`TRUEMONEY_RECEIVER_ACCOUNT_NUMBER` and `TRUEMONEY_RECEIVER_ACCOUNT_NUMBERS` are used only when the selected LINE payment method is `truemoney`.
+
+`TRUEMONEY_RECEIVER_ACCOUNT_NAME` overrides `SLIP_RECEIVER_ACCOUNT_NAME` for TrueMoney slip checks. If it is not set, the webhook falls back to `SLIP_RECEIVER_ACCOUNT_NAME`.
+
+`TRUEMONEY_AUTO_REJECT_RECEIVER_MISMATCH` defaults to `false`. TrueMoney receipt OCR can miss masked account/name text, so receiver mismatches block auto-approval but do not auto-reject unless this is set to `true`.
 
 The webhook also includes a `PROMPTPAY_ID` constant in `src/app/api/line/webhook/route.ts`, because the bank-transfer QR payload is generated from that value.
 

@@ -559,10 +559,11 @@ async function handleSlipImage(event: LineWebhookEvent, messageId: string) {
   const image = await downloadLineMessageContent(messageId);
   const imageBuffer = Buffer.from(image.data);
   const expectedReceiverAccounts = getExpectedSlipReceiverAccounts(activeRequest.method);
-  const expectedReceiverName = process.env.SLIP_RECEIVER_ACCOUNT_NAME?.trim();
+  const expectedReceiverName = getExpectedSlipReceiverName(activeRequest.method);
   const slipCheck = await analyzeSlipImage(imageBuffer, activeRequest.amount, {
     expectedReceiverAccounts,
     expectedReceiverName,
+    paymentMethod: activeRequest.method,
     transactionAccountExclusions: [PROMPTPAY_ID],
   });
   const [existingRequestRows, archivedSlipRows] = await Promise.all([
@@ -590,10 +591,13 @@ async function handleSlipImage(event: LineWebhookEvent, messageId: string) {
     slipCheck.amountMatches !== true &&
     slipCheck.receiverAccountMatches !== true &&
     slipCheck.receiverNameMatches !== true;
+  const canAutoRejectReceiverMismatch =
+    activeRequest.method !== "truemoney" ||
+    process.env.TRUEMONEY_AUTO_REJECT_RECEIVER_MISMATCH === "true";
   const autoRejectReasons = [
     slipCheck.amountMatches === false ? "ยอดเงินในสลิปไม่ตรงกับยอดที่เลือกไว้" : "",
-    slipCheck.receiverAccountMatches === false ? "บัญชีปลายทางไม่ตรงกับที่ตั้งค่าไว้" : "",
-    slipCheck.receiverNameMatches === false ? "ชื่อบัญชีปลายทางไม่ตรงกับที่ตั้งค่าไว้" : "",
+    canAutoRejectReceiverMismatch && slipCheck.receiverAccountMatches === false ? "บัญชีปลายทางไม่ตรงกับที่ตั้งค่าไว้" : "",
+    canAutoRejectReceiverMismatch && slipCheck.receiverNameMatches === false ? "ชื่อบัญชีปลายทางไม่ตรงกับที่ตั้งค่าไว้" : "",
     shouldAutoRejectInvalidImage ? "ระบบไม่พบ QR สลิป ยอดเงิน เลขธุรกรรม หรือข้อมูลบัญชีจากรูปที่ส่งมา" : "",
   ].filter(Boolean);
   const shouldAutoRejectSlip = autoRejectReasons.length > 0;
@@ -629,6 +633,7 @@ async function handleSlipImage(event: LineWebhookEvent, messageId: string) {
     amountSource: slipCheck.amountSource,
     receiverAccountMatches: slipCheck.receiverAccountMatches,
     receiverNameMatches: slipCheck.receiverNameMatches,
+    detectedReceiverName: slipCheck.detectedReceiverName,
     slipTransactionId: slipCheck.slipTransactionId,
     autoApproved: canAutoApprove,
   });
@@ -1238,6 +1243,7 @@ function buildAutoCheckResult({
   amountSource,
   receiverAccountMatches,
   receiverNameMatches,
+  detectedReceiverName,
   slipTransactionId,
   autoApproved,
 }: {
@@ -1252,6 +1258,7 @@ function buildAutoCheckResult({
   amountSource: "qr" | "ocr" | null;
   receiverAccountMatches: boolean | null;
   receiverNameMatches: boolean | null;
+  detectedReceiverName?: string;
   slipTransactionId?: string;
   autoApproved: boolean;
 }) {
@@ -1277,6 +1284,7 @@ function buildAutoCheckResult({
   if (receiverAccountMatches === null) parts.push("ยังตรวจบัญชีปลายทางไม่ได้");
   if (receiverNameMatches === false) parts.push("ชื่อบัญชีปลายทางไม่ตรงกับที่ตั้งค่าไว้");
   if (receiverNameMatches === null) parts.push("ยังตรวจชื่อบัญชีปลายทางไม่ได้");
+  if (detectedReceiverName) parts.push(`ชื่อที่อ่านได้: ${detectedReceiverName}`);
   if (autoApproved) {
     return amountMatches === true
       ? "ผ่านเงื่อนไขอัตโนมัติ: QR ใหม่ เลขธุรกรรมใหม่ และยอดตรงกับรายการ"
@@ -1287,14 +1295,26 @@ function buildAutoCheckResult({
 }
 
 function getExpectedSlipReceiverAccounts(method: string | undefined) {
-  const configured = [
-    PROMPTPAY_ID,
-    process.env.SLIP_RECEIVER_ACCOUNT_NUMBER,
-    process.env.SLIP_RECEIVER_ACCOUNT_NUMBERS,
-    method === "truemoney" ? process.env.TRUEMONEY_RECEIVER_ACCOUNT_NUMBER : undefined,
-  ].flatMap((value) => splitEnvList(value));
+  const configured = method === "truemoney"
+    ? [
+      process.env.TRUEMONEY_RECEIVER_ACCOUNT_NUMBER,
+      process.env.TRUEMONEY_RECEIVER_ACCOUNT_NUMBERS,
+    ].flatMap((value) => splitEnvList(value))
+    : [
+      PROMPTPAY_ID,
+      process.env.SLIP_RECEIVER_ACCOUNT_NUMBER,
+      process.env.SLIP_RECEIVER_ACCOUNT_NUMBERS,
+    ].flatMap((value) => splitEnvList(value));
 
   return Array.from(new Set(configured.filter(Boolean)));
+}
+
+function getExpectedSlipReceiverName(method: string | undefined) {
+  return (
+    method === "truemoney"
+      ? process.env.TRUEMONEY_RECEIVER_ACCOUNT_NAME?.trim() || process.env.SLIP_RECEIVER_ACCOUNT_NAME?.trim()
+      : process.env.SLIP_RECEIVER_ACCOUNT_NAME?.trim()
+  ) || undefined;
 }
 
 function splitEnvList(value: string | undefined) {

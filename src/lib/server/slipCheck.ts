@@ -21,11 +21,13 @@ export type SlipCheckResult = {
   amountMatches: boolean | null;
   receiverAccountMatches: boolean | null;
   receiverNameMatches: boolean | null;
+  detectedReceiverName?: string;
 };
 
 export type SlipCheckOptions = {
   expectedReceiverAccounts?: string[];
   expectedReceiverName?: string;
+  paymentMethod?: string;
   transactionAccountExclusions?: string[];
 };
 
@@ -50,6 +52,7 @@ export async function analyzeSlipImage(
   ]);
   const expectedReceiverName = options.expectedReceiverName?.trim();
   const searchableText = [qrPayload, ocrText].filter(Boolean).join("\n");
+  const detectedReceiverName = extractReceiverNameFromText(ocrText, options.paymentMethod);
   const amountMatches =
     typeof detectedAmount === "number" && Number.isFinite(expectedAmount) && expectedAmount > 0
       ? Math.abs(detectedAmount - expectedAmount) < 0.01
@@ -58,7 +61,7 @@ export async function analyzeSlipImage(
     ? containsExpectedAccount(searchableText, expectedAccounts)
     : null;
   const receiverNameMatches = searchableText && expectedReceiverName
-    ? containsExpectedName(searchableText, expectedReceiverName)
+    ? containsExpectedName([searchableText, detectedReceiverName].filter(Boolean).join("\n"), expectedReceiverName)
     : null;
   const slipTransactionId = qrPayload
     ? extractSlipTransactionId(qrPayload, transactionAccountExclusions, qrAmount)
@@ -77,6 +80,7 @@ export async function analyzeSlipImage(
     amountMatches,
     receiverAccountMatches,
     receiverNameMatches,
+    detectedReceiverName,
   };
 }
 
@@ -128,7 +132,23 @@ async function readOcrText(data: Buffer) {
         .png()
         .toBuffer()
       : undefined;
-    const buffers = [prepared, topCrop].filter((buffer): buffer is Buffer => Boolean(buffer));
+    const middleCrop = metadata.width && metadata.height
+      ? await sharp(data)
+        .rotate()
+        .extract({
+          left: 0,
+          top: Math.max(0, Math.round(metadata.height * 0.12)),
+          width: metadata.width,
+          height: Math.max(1, Math.round(metadata.height * 0.5)),
+        })
+        .resize({ width: 2400 })
+        .grayscale()
+        .normalize()
+        .sharpen()
+        .png()
+        .toBuffer()
+      : undefined;
+    const buffers = [prepared, topCrop, middleCrop].filter((buffer): buffer is Buffer => Boolean(buffer));
     const results = await Promise.all(
       buffers.map((buffer) => recognize(buffer, lang, createOcrOptions(langPath)))
     );
@@ -304,7 +324,81 @@ function fourDigitFragments(value: string) {
 
 function containsExpectedName(payload: string, expectedName: string) {
   const normalizedPayload = normalizeTextForSearch(payload);
-  return nameVariants(expectedName).some((name) => name.length >= 2 && normalizedPayload.includes(name));
+  return nameVariants(expectedName).some((name) => {
+    if (name.length < 2) return false;
+    if (normalizedPayload.includes(name)) return true;
+
+    return nameTokens(name).some((token) => fuzzyIncludes(normalizedPayload, token));
+  });
+}
+
+function extractReceiverNameFromText(text: string | undefined, paymentMethod: string | undefined) {
+  if (!text) return undefined;
+
+  if (paymentMethod === "truemoney") {
+    const trueMoneyName = extractTrueMoneyReceiverName(text);
+    if (trueMoneyName) return trueMoneyName;
+  }
+
+  return extractLikelyThaiName(text);
+}
+
+function extractTrueMoneyReceiverName(text: string) {
+  const lines = text
+    .split(/\r?\n/)
+    .map(cleanOcrLine)
+    .filter(Boolean);
+  const walletAccountIndexes = lines
+    .map((line, index) => /บัญชีทรูมันนี่|ทรูมันนี่|true\s*money/i.test(line) && /[0-9*Xx]{2,}/.test(line) ? index : -1)
+    .filter((index) => index >= 0);
+
+  for (const accountIndex of walletAccountIndexes.slice().reverse()) {
+    const candidate = findNameBeforeLine(lines, accountIndex);
+    if (candidate) return candidate;
+  }
+
+  return extractLikelyThaiName(text);
+}
+
+function findNameBeforeLine(lines: string[], index: number) {
+  for (let cursor = index - 1; cursor >= 0 && cursor >= index - 4; cursor -= 1) {
+    const line = lines[cursor];
+    if (isLikelySlipLabel(line)) continue;
+
+    const name = extractThaiNameFromLine(line);
+    if (name) return name;
+  }
+
+  return undefined;
+}
+
+function extractLikelyThaiName(text: string) {
+  return text
+    .split(/\r?\n/)
+    .map(cleanOcrLine)
+    .map(extractThaiNameFromLine)
+    .find((name): name is string => Boolean(name));
+}
+
+function extractThaiNameFromLine(line: string | undefined) {
+  if (!line || isLikelySlipLabel(line)) return undefined;
+
+  const cleaned = line
+    .replace(/[A-Za-z0-9*#@_:.,/\\|()[\]{}-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!/[ก-๙]/.test(cleaned)) return undefined;
+  if (cleaned.length < 4 || cleaned.length > 64) return undefined;
+
+  return cleaned;
+}
+
+function cleanOcrLine(line: string) {
+  return line.replace(/\s+/g, " ").trim();
+}
+
+function isLikelySlipLabel(line: string) {
+  return /จำนวน|ยอด|บาท|วันที่|เวลา|หมายเลข|รายการ|สถานที่|สแกน|ตรวจสอบ|บัญชี|wallet|account|true\s*money|truemoney|จาก|ไปยัง/i.test(line);
 }
 
 function nameVariants(name: string) {
@@ -321,6 +415,50 @@ function normalizeTextForSearch(value: string) {
     .normalize("NFKC")
     .toLocaleLowerCase("th-TH")
     .replace(/[\s._\-:|/\\()[\]{}]+/g, "");
+}
+
+function nameTokens(normalizedName: string) {
+  return normalizedName
+    .split(/(?=ปัญ|กุล|วงศ์|ทรัพย์|ศักดิ์|รัตน์|พร|ชัย|ธาร)/)
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 4);
+}
+
+function fuzzyIncludes(payload: string, token: string) {
+  if (payload.includes(token)) return true;
+
+  const maxDistance = token.length <= 6 ? 2 : Math.max(2, Math.floor(token.length * 0.18));
+  for (let index = 0; index + token.length <= payload.length; index += 1) {
+    const candidate = payload.slice(index, index + token.length);
+    if (levenshteinDistance(candidate, token, maxDistance) <= maxDistance) return true;
+  }
+
+  return false;
+}
+
+function levenshteinDistance(a: string, b: string, maxDistance: number) {
+  let previous = Array.from({ length: b.length + 1 }, (_, index) => index);
+
+  for (let i = 1; i <= a.length; i += 1) {
+    const current = [i];
+    let rowMin = current[0];
+
+    for (let j = 1; j <= b.length; j += 1) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      const value = Math.min(
+        current[j - 1] + 1,
+        previous[j] + 1,
+        previous[j - 1] + cost
+      );
+      current[j] = value;
+      rowMin = Math.min(rowMin, value);
+    }
+
+    if (rowMin > maxDistance) return rowMin;
+    previous = current;
+  }
+
+  return previous[b.length];
 }
 
 function extractSlipTransactionId(payload: string, expectedAccounts: ExpectedReceiverAccount[], amount: number | undefined) {
