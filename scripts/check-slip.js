@@ -9,51 +9,63 @@ const jsQrModule = require("jsqr");
 const { recognize } = require("tesseract.js");
 
 const jsQR = jsQrModule.default || jsQrModule;
+const PROMPTPAY_ID = "004666006046829";
 
 async function main() {
-  const [imagePath, amountArg, accountArg, nameArg] = process.argv.slice(2);
+  const args = parseArgs(process.argv.slice(2));
+  const imagePath = args._[0];
   if (!imagePath) {
-    console.error("Usage: node scripts/check-slip.js <image_path> [expected_amount] [receiver_account] [receiver_name]");
-    console.error("Example: node scripts/check-slip.js ./slip.jpg 100 xxx-x-x4106-x \"ด.ช. ต้นธาร ปัญโญศักดิ์\"");
+    console.error("Usage: node scripts/check-slip.js <image_path> --amount <expected_amount> [--method bank|truemoney] [--account <receiver_account>] [--name <receiver_name>]");
+    console.error("Example bank: node scripts/check-slip.js ./slip.jpg --amount 80 --method bank");
+    console.error("Example TrueMoney: node scripts/check-slip.js ./slip.jpg --amount 10 --method truemoney");
     process.exit(1);
   }
 
   const env = readDotEnv(path.join(process.cwd(), ".env.local"));
   if (env.SLIP_OCR_LANG) process.env.SLIP_OCR_LANG = env.SLIP_OCR_LANG;
+  if (env.TRUEMONEY_AUTO_REJECT_RECEIVER_MISMATCH) {
+    process.env.TRUEMONEY_AUTO_REJECT_RECEIVER_MISMATCH = env.TRUEMONEY_AUTO_REJECT_RECEIVER_MISMATCH;
+  }
   const resolvedPath = path.resolve(process.cwd(), imagePath);
   if (!fs.existsSync(resolvedPath)) {
     console.error(`File not found: ${resolvedPath}`);
     process.exit(1);
   }
 
-  const expectedAmount = Number(amountArg || 0);
-  const expectedReceiverAccounts = splitList(accountArg)
-    .concat(splitList(env.SLIP_RECEIVER_ACCOUNT_NUMBER))
-    .concat(splitList(env.SLIP_RECEIVER_ACCOUNT_NUMBERS))
-    .concat(splitList(env.TRUEMONEY_RECEIVER_ACCOUNT_NUMBER))
-    .filter(Boolean);
-  const expectedReceiverName = nameArg || env.SLIP_RECEIVER_ACCOUNT_NAME || "";
+  const paymentMethod = args.method || args.m || "bank";
+  const expectedAmount = Number(args.amount || args.a || args._[1] || 0);
+  const expectedReceiverAccounts = getExpectedSlipReceiverAccounts(paymentMethod, env, args.account);
+  const expectedReceiverName = args.name || getExpectedSlipReceiverName(paymentMethod, env) || "";
 
   const data = fs.readFileSync(resolvedPath);
   const result = await analyzeSlipImage(data, expectedAmount, {
     expectedReceiverAccounts,
     expectedReceiverName,
+    paymentMethod,
   });
 
   const report = {
     file: resolvedPath,
     expected: {
+      method: paymentMethod,
       amount: expectedAmount || null,
       receiverAccounts: expectedReceiverAccounts,
       receiverName: expectedReceiverName || null,
     },
     extracted: result,
     decision: {
+      wouldAutoReject: wouldAutoReject(result, paymentMethod),
+      wouldAutoApprove:
+        result.qrReadable &&
+        result.amountMatches === true &&
+        result.receiverAccountMatches === true &&
+        (!expectedReceiverName || result.receiverNameMatches === true) &&
+        Boolean(result.slipTransactionId),
       looksGood:
         result.qrReadable &&
         result.amountMatches === true &&
         result.receiverAccountMatches === true &&
-        result.receiverNameMatches === true &&
+        (!expectedReceiverName || result.receiverNameMatches === true) &&
         Boolean(result.slipTransactionId),
       reasons: buildReasons(result),
     },
@@ -74,6 +86,7 @@ async function analyzeSlipImage(data, expectedAmount, options = {}) {
   const expectedAccounts = normalizeExpectedAccounts(options.expectedReceiverAccounts);
   const expectedReceiverName = options.expectedReceiverName && options.expectedReceiverName.trim();
   const searchableText = [qrPayload, ocrText].filter(Boolean).join("\n");
+  const rawDetectedReceiverName = extractReceiverNameFromText(ocrText, options.paymentMethod);
   const amountMatches =
     typeof detectedAmount === "number" && Number.isFinite(expectedAmount) && expectedAmount > 0
       ? Math.abs(detectedAmount - expectedAmount) < 0.01
@@ -82,8 +95,11 @@ async function analyzeSlipImage(data, expectedAmount, options = {}) {
     ? containsExpectedAccount(searchableText, expectedAccounts)
     : null;
   const receiverNameMatches = searchableText && expectedReceiverName
-    ? containsExpectedName(searchableText, expectedReceiverName)
+    ? containsExpectedName([searchableText, rawDetectedReceiverName].filter(Boolean).join("\n"), expectedReceiverName)
     : null;
+  const detectedReceiverName = receiverNameMatches === true && expectedReceiverName
+    ? expectedReceiverName
+    : rawDetectedReceiverName;
   const slipTransactionId = qrPayload
     ? extractSlipTransactionId(qrPayload, expectedAccounts, qrAmount)
     : undefined;
@@ -100,6 +116,8 @@ async function analyzeSlipImage(data, expectedAmount, options = {}) {
     amountMatches,
     receiverAccountMatches,
     receiverNameMatches,
+    detectedReceiverName,
+    rawDetectedReceiverName,
     slipTransactionId,
   };
 }
@@ -131,25 +149,44 @@ async function readOcrText(data) {
       .sharpen()
       .png()
       .toBuffer();
-    const topCrop = await sharp(data)
-      .rotate()
-      .extract({
-        left: 0,
-        top: 0,
-        width: metadata.width,
-        height: Math.max(1, Math.round(metadata.height * 0.28)),
-      })
-      .resize({ width: 2400 })
-      .grayscale()
-      .normalize()
-      .sharpen()
-      .png()
-      .toBuffer();
-    const [fullResult, topResult] = await Promise.all([
-      recognize(prepared, lang, createOcrOptions(langPath)),
-      recognize(topCrop, lang, createOcrOptions(langPath)),
-    ]);
-    return [fullResult.data.text.trim(), topResult.data.text.trim()]
+    const topCrop = metadata.width && metadata.height
+      ? await sharp(data)
+        .rotate()
+        .extract({
+          left: 0,
+          top: 0,
+          width: metadata.width,
+          height: Math.max(1, Math.round(metadata.height * 0.28)),
+        })
+        .resize({ width: 2400 })
+        .grayscale()
+        .normalize()
+        .sharpen()
+        .png()
+        .toBuffer()
+      : undefined;
+    const middleCrop = metadata.width && metadata.height
+      ? await sharp(data)
+        .rotate()
+        .extract({
+          left: 0,
+          top: Math.max(0, Math.round(metadata.height * 0.12)),
+          width: metadata.width,
+          height: Math.max(1, Math.round(metadata.height * 0.5)),
+        })
+        .resize({ width: 2400 })
+        .grayscale()
+        .normalize()
+        .sharpen()
+        .png()
+        .toBuffer()
+      : undefined;
+    const buffers = [prepared, topCrop, middleCrop].filter(Boolean);
+    const results = await Promise.all(
+      buffers.map((buffer) => recognize(buffer, lang, createOcrOptions(langPath)))
+    );
+    return results
+      .map((result) => result.data.text.trim())
       .filter(Boolean)
       .join("\n");
   } catch (error) {
@@ -300,7 +337,97 @@ function fourDigitFragments(value) {
 
 function containsExpectedName(payload, expectedName) {
   const normalizedPayload = normalizeTextForSearch(payload);
-  return nameVariants(expectedName).some((name) => name.length >= 2 && normalizedPayload.includes(name));
+  return nameVariants(expectedName).some((name) => {
+    if (name.length < 2) return false;
+    if (normalizedPayload.includes(name)) return true;
+
+    return nameTokens(name).some((token) => fuzzyIncludes(normalizedPayload, token));
+  });
+}
+
+function extractReceiverNameFromText(text, paymentMethod) {
+  if (!text || String(text).startsWith("__OCR_ERROR__")) return undefined;
+
+  if (paymentMethod === "truemoney") {
+    const trueMoneyName = extractTrueMoneyReceiverName(text);
+    if (trueMoneyName) return trueMoneyName;
+  }
+
+  return extractLikelyThaiName(text);
+}
+
+function extractTrueMoneyReceiverName(text) {
+  const lines = String(text)
+    .split(/\r?\n/)
+    .map(cleanOcrLine)
+    .filter(Boolean);
+  const walletAccountIndexes = lines
+    .map((line, index) => isTrueMoneyWalletAccountLine(line) ? index : -1)
+    .filter((index) => index >= 0);
+
+  for (const accountIndex of walletAccountIndexes.slice().reverse()) {
+    const candidate = findNameBeforeLine(lines, accountIndex);
+    if (candidate) return candidate;
+  }
+
+  return extractLikelyThaiName(text);
+}
+
+function findNameBeforeLine(lines, index) {
+  for (let cursor = index - 1; cursor >= 0 && cursor >= index - 4; cursor -= 1) {
+    const line = lines[cursor];
+    if (isLikelySlipLabel(line)) continue;
+
+    const name = extractThaiNameFromLine(line);
+    if (name) return name;
+  }
+
+  return undefined;
+}
+
+function extractLikelyThaiName(text) {
+  return String(text)
+    .split(/\r?\n/)
+    .map(cleanOcrLine)
+    .map(extractThaiNameFromLine)
+    .find(Boolean);
+}
+
+function extractThaiNameFromLine(line) {
+  if (!line || isLikelySlipLabel(line)) return undefined;
+
+  const cleaned = String(line)
+    .replace(/[A-Za-z0-9๐-๙*#@_:.,/\\|()[\]{}\-"'“”‘’]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!/[ก-๙]/.test(cleaned)) return undefined;
+
+  const compacted = compactSpacedThaiText(cleaned);
+  if (compacted.length < 4 || compacted.length > 64) return undefined;
+  if (isLikelySlipLabel(compacted)) return undefined;
+
+  return compacted;
+}
+
+function cleanOcrLine(line) {
+  return String(line).replace(/\s+/g, " ").trim();
+}
+
+function isLikelySlipLabel(line) {
+  const normalized = normalizeTextForSearch(line);
+  return /จำนวน|ยอด|บาท|วันที่|เวลา|หมายเลข|รายการ|สถานที่|สแกน|ตรวจสอบ|บัญชี|wallet|account|truemoney|truemon|จาก|ไปยัง/i.test(normalized);
+}
+
+function isTrueMoneyWalletAccountLine(line) {
+  const normalized = normalizeTextForSearch(line);
+  return /บัญชีทรูมันนี่|บัญชีทรมันนี่|ทรูมันนี่|ทรมันนี่|truemoney|truemon/i.test(normalized) && /[0-9*Xx]{2,}/.test(String(line));
+}
+
+function compactSpacedThaiText(value) {
+  return String(value)
+    .replace(/\s+(?=[ก-๙])/g, "")
+    .replace(/(?<=[ก-๙])\s+/g, "")
+    .trim();
 }
 
 function nameVariants(name) {
@@ -317,6 +444,50 @@ function normalizeTextForSearch(value) {
     .normalize("NFKC")
     .toLocaleLowerCase("th-TH")
     .replace(/[\s._\-:|/\\()[\]{}]+/g, "");
+}
+
+function nameTokens(normalizedName) {
+  return String(normalizedName)
+    .split(/(?=ปัญ|กุล|วงศ์|ทรัพย์|ศักดิ์|รัตน์|พร|ชัย|ธาร)/)
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 4);
+}
+
+function fuzzyIncludes(payload, token) {
+  if (payload.includes(token)) return true;
+
+  const maxDistance = token.length <= 6 ? 2 : Math.max(2, Math.floor(token.length * 0.18));
+  for (let index = 0; index + token.length <= payload.length; index += 1) {
+    const candidate = payload.slice(index, index + token.length);
+    if (levenshteinDistance(candidate, token, maxDistance) <= maxDistance) return true;
+  }
+
+  return false;
+}
+
+function levenshteinDistance(a, b, maxDistance) {
+  let previous = Array.from({ length: b.length + 1 }, (_, index) => index);
+
+  for (let i = 1; i <= a.length; i += 1) {
+    const current = [i];
+    let rowMin = current[0];
+
+    for (let j = 1; j <= b.length; j += 1) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      const value = Math.min(
+        current[j - 1] + 1,
+        previous[j] + 1,
+        previous[j - 1] + cost
+      );
+      current[j] = value;
+      rowMin = Math.min(rowMin, value);
+    }
+
+    if (rowMin > maxDistance) return rowMin;
+    previous = current;
+  }
+
+  return previous[b.length];
 }
 
 function extractSlipTransactionId(payload, expectedAccounts, amount) {
@@ -372,11 +543,75 @@ function buildReasons(result) {
   return reasons.length > 0 ? reasons : ["All local checks passed"];
 }
 
+function wouldAutoReject(result, paymentMethod) {
+  const canAutoRejectReceiverMismatch =
+    paymentMethod !== "truemoney" ||
+    process.env.TRUEMONEY_AUTO_REJECT_RECEIVER_MISMATCH === "true";
+
+  return (
+    result.amountMatches === false ||
+    (canAutoRejectReceiverMismatch && result.receiverAccountMatches === false) ||
+    (canAutoRejectReceiverMismatch && result.receiverNameMatches === false) ||
+    (
+      !result.qrReadable &&
+      !result.slipTransactionId &&
+      result.amountMatches !== true &&
+      result.receiverAccountMatches !== true &&
+      result.receiverNameMatches !== true
+    )
+  );
+}
+
+function getExpectedSlipReceiverAccounts(method, env, overrideAccount) {
+  const configured = method === "truemoney"
+    ? [
+      overrideAccount,
+      env.TRUEMONEY_RECEIVER_ACCOUNT_NUMBER,
+      env.TRUEMONEY_RECEIVER_ACCOUNT_NUMBERS,
+    ]
+    : [
+      overrideAccount,
+      PROMPTPAY_ID,
+      env.SLIP_RECEIVER_ACCOUNT_NUMBER,
+      env.SLIP_RECEIVER_ACCOUNT_NUMBERS,
+    ];
+
+  return Array.from(new Set(configured.flatMap(splitList).filter(Boolean)));
+}
+
+function getExpectedSlipReceiverName(method, env) {
+  return (
+    method === "truemoney"
+      ? env.TRUEMONEY_RECEIVER_ACCOUNT_NAME || env.SLIP_RECEIVER_ACCOUNT_NAME
+      : env.SLIP_RECEIVER_ACCOUNT_NAME
+  );
+}
+
 function splitList(value) {
   return String(value || "")
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function parseArgs(argv) {
+  const parsed = { _: [] };
+
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (!arg.startsWith("--")) {
+      parsed._.push(arg);
+      continue;
+    }
+
+    const [rawKey, inlineValue] = arg.slice(2).split("=");
+    const key = rawKey.trim();
+    const value = inlineValue !== undefined ? inlineValue : argv[index + 1];
+    if (inlineValue === undefined) index += 1;
+    parsed[key] = value;
+  }
+
+  return parsed;
 }
 
 function readDotEnv(filePath) {

@@ -634,6 +634,7 @@ async function handleSlipImage(event: LineWebhookEvent, messageId: string) {
     receiverAccountMatches: slipCheck.receiverAccountMatches,
     receiverNameMatches: slipCheck.receiverNameMatches,
     detectedReceiverName: slipCheck.detectedReceiverName,
+    rawDetectedReceiverName: slipCheck.rawDetectedReceiverName,
     slipTransactionId: slipCheck.slipTransactionId,
     autoApproved: canAutoApprove,
   });
@@ -1244,6 +1245,7 @@ function buildAutoCheckResult({
   receiverAccountMatches,
   receiverNameMatches,
   detectedReceiverName,
+  rawDetectedReceiverName,
   slipTransactionId,
   autoApproved,
 }: {
@@ -1259,6 +1261,7 @@ function buildAutoCheckResult({
   receiverAccountMatches: boolean | null;
   receiverNameMatches: boolean | null;
   detectedReceiverName?: string;
+  rawDetectedReceiverName?: string;
   slipTransactionId?: string;
   autoApproved: boolean;
 }) {
@@ -1285,6 +1288,9 @@ function buildAutoCheckResult({
   if (receiverNameMatches === false) parts.push("ชื่อบัญชีปลายทางไม่ตรงกับที่ตั้งค่าไว้");
   if (receiverNameMatches === null) parts.push("ยังตรวจชื่อบัญชีปลายทางไม่ได้");
   if (detectedReceiverName) parts.push(`ชื่อที่อ่านได้: ${detectedReceiverName}`);
+  if (rawDetectedReceiverName && rawDetectedReceiverName !== detectedReceiverName) {
+    parts.push(`OCR อ่านเป็น: ${rawDetectedReceiverName}`);
+  }
   if (autoApproved) {
     return amountMatches === true
       ? "ผ่านเงื่อนไขอัตโนมัติ: QR ใหม่ เลขธุรกรรมใหม่ และยอดตรงกับรายการ"

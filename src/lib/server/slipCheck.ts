@@ -22,6 +22,7 @@ export type SlipCheckResult = {
   receiverAccountMatches: boolean | null;
   receiverNameMatches: boolean | null;
   detectedReceiverName?: string;
+  rawDetectedReceiverName?: string;
 };
 
 export type SlipCheckOptions = {
@@ -52,7 +53,7 @@ export async function analyzeSlipImage(
   ]);
   const expectedReceiverName = options.expectedReceiverName?.trim();
   const searchableText = [qrPayload, ocrText].filter(Boolean).join("\n");
-  const detectedReceiverName = extractReceiverNameFromText(ocrText, options.paymentMethod);
+  const rawDetectedReceiverName = extractReceiverNameFromText(ocrText, options.paymentMethod);
   const amountMatches =
     typeof detectedAmount === "number" && Number.isFinite(expectedAmount) && expectedAmount > 0
       ? Math.abs(detectedAmount - expectedAmount) < 0.01
@@ -61,8 +62,11 @@ export async function analyzeSlipImage(
     ? containsExpectedAccount(searchableText, expectedAccounts)
     : null;
   const receiverNameMatches = searchableText && expectedReceiverName
-    ? containsExpectedName([searchableText, detectedReceiverName].filter(Boolean).join("\n"), expectedReceiverName)
+    ? containsExpectedName([searchableText, rawDetectedReceiverName].filter(Boolean).join("\n"), expectedReceiverName)
     : null;
+  const detectedReceiverName = receiverNameMatches === true && expectedReceiverName
+    ? expectedReceiverName
+    : rawDetectedReceiverName;
   const slipTransactionId = qrPayload
     ? extractSlipTransactionId(qrPayload, transactionAccountExclusions, qrAmount)
     : undefined;
@@ -81,6 +85,7 @@ export async function analyzeSlipImage(
     receiverAccountMatches,
     receiverNameMatches,
     detectedReceiverName,
+    rawDetectedReceiverName,
   };
 }
 
@@ -349,7 +354,7 @@ function extractTrueMoneyReceiverName(text: string) {
     .map(cleanOcrLine)
     .filter(Boolean);
   const walletAccountIndexes = lines
-    .map((line, index) => /บัญชีทรูมันนี่|ทรูมันนี่|true\s*money/i.test(line) && /[0-9*Xx]{2,}/.test(line) ? index : -1)
+    .map((line, index) => isTrueMoneyWalletAccountLine(line) ? index : -1)
     .filter((index) => index >= 0);
 
   for (const accountIndex of walletAccountIndexes.slice().reverse()) {
@@ -384,13 +389,16 @@ function extractThaiNameFromLine(line: string | undefined) {
   if (!line || isLikelySlipLabel(line)) return undefined;
 
   const cleaned = line
-    .replace(/[A-Za-z0-9*#@_:.,/\\|()[\]{}-]+/g, " ")
+    .replace(/[A-Za-z0-9๐-๙*#@_:.,/\\|()[\]{}\-"'“”‘’]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
   if (!/[ก-๙]/.test(cleaned)) return undefined;
-  if (cleaned.length < 4 || cleaned.length > 64) return undefined;
 
-  return cleaned;
+  const compacted = compactSpacedThaiText(cleaned);
+  if (compacted.length < 4 || compacted.length > 64) return undefined;
+  if (isLikelySlipLabel(compacted)) return undefined;
+
+  return compacted;
 }
 
 function cleanOcrLine(line: string) {
@@ -398,7 +406,20 @@ function cleanOcrLine(line: string) {
 }
 
 function isLikelySlipLabel(line: string) {
-  return /จำนวน|ยอด|บาท|วันที่|เวลา|หมายเลข|รายการ|สถานที่|สแกน|ตรวจสอบ|บัญชี|wallet|account|true\s*money|truemoney|จาก|ไปยัง/i.test(line);
+  const normalized = normalizeTextForSearch(line);
+  return /จำนวน|ยอด|บาท|วันที่|เวลา|หมายเลข|รายการ|สถานที่|สแกน|ตรวจสอบ|บัญชี|wallet|account|truemoney|truemon|จาก|ไปยัง/i.test(normalized);
+}
+
+function isTrueMoneyWalletAccountLine(line: string) {
+  const normalized = normalizeTextForSearch(line);
+  return /บัญชีทรูมันนี่|บัญชีทรมันนี่|ทรูมันนี่|ทรมันนี่|truemoney|truemon/i.test(normalized) && /[0-9*Xx]{2,}/.test(line);
+}
+
+function compactSpacedThaiText(value: string) {
+  return value
+    .replace(/\s+(?=[ก-๙])/g, "")
+    .replace(/(?<=[ก-๙])\s+/g, "")
+    .trim();
 }
 
 function nameVariants(name: string) {
