@@ -599,6 +599,8 @@ async function handleSlipImage(event: LineWebhookEvent, messageId: string) {
     amountMatches: slipCheck.amountMatches,
     qrReadable: slipCheck.qrReadable,
     qrAmount: slipCheck.qrAmount,
+    detectedAmount: slipCheck.detectedAmount,
+    amountSource: slipCheck.amountSource,
     receiverAccountMatches: slipCheck.receiverAccountMatches,
     receiverNameMatches: slipCheck.receiverNameMatches,
     slipTransactionId: slipCheck.slipTransactionId,
@@ -622,7 +624,7 @@ async function handleSlipImage(event: LineWebhookEvent, messageId: string) {
       slip_qr_payload: slipCheck.qrPayload ?? null,
       slip_image_hash: slipCheck.imageHash,
       slip_transaction_id: slipCheck.slipTransactionId ?? null,
-      slip_ocr_text: null,
+      slip_ocr_text: slipCheck.ocrText ?? null,
       slip_auto_check_result: autoCheckResult,
       reject_reason: null,
       reviewed_by: null,
@@ -1186,6 +1188,8 @@ function buildAutoCheckResult({
   amountMatches,
   qrReadable,
   qrAmount,
+  detectedAmount,
+  amountSource,
   receiverAccountMatches,
   receiverNameMatches,
   slipTransactionId,
@@ -1197,6 +1201,8 @@ function buildAutoCheckResult({
   amountMatches: boolean | null;
   qrReadable: boolean;
   qrAmount?: number;
+  detectedAmount?: number;
+  amountSource: "qr" | "ocr" | null;
   receiverAccountMatches: boolean | null;
   receiverNameMatches: boolean | null;
   slipTransactionId?: string;
@@ -1213,9 +1219,11 @@ function buildAutoCheckResult({
   }
   if (!qrReadable) parts.push("อ่าน QR จากสลิปไม่ได้");
   if (amountMatches === false) {
-    parts.push(`ยอดใน QR ไม่ตรง${typeof qrAmount === "number" ? ` (${formatBaht(qrAmount)})` : ""}`);
+    const sourceLabel = amountSource === "ocr" ? "รูปสลิป" : "QR";
+    const checkedAmount = typeof detectedAmount === "number" ? detectedAmount : qrAmount;
+    parts.push(`ยอดใน${sourceLabel}ไม่ตรง${typeof checkedAmount === "number" ? ` (${formatBaht(checkedAmount)})` : ""}`);
   }
-  if (amountMatches === null) parts.push("ยังยืนยันยอดเงินจาก QR ไม่ได้");
+  if (amountMatches === null) parts.push("ยังยืนยันยอดเงินจากสลิปไม่ได้");
   if (!slipTransactionId) parts.push("ยังหาเลขธุรกรรมจากสลิปไม่ได้");
   if (receiverAccountMatches === false) parts.push("บัญชีปลายทางไม่ตรงกับที่ตั้งค่าไว้");
   if (receiverAccountMatches === null) parts.push("ยังตรวจบัญชีปลายทางไม่ได้");
