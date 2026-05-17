@@ -1,5 +1,6 @@
 import { noContent, notFound, ok, serverError } from "@/lib/api/response";
-import { deleteRecord, getRecord, updateRecord, type Row } from "@/lib/supabase/server";
+import { deleteTransactionWithSlipData } from "@/lib/server/transactionDeletion";
+import { getRecord, updateRecord, type Row } from "@/lib/supabase/server";
 import { mapTransaction } from "@/lib/supabase/mappers";
 import type { TransactionUpdate } from "@/types/supabase";
 
@@ -47,7 +48,7 @@ export async function PATCH(request: Request, context: RouteContext) {
 export async function DELETE(_request: Request, context: RouteContext) {
   try {
     const { id } = await context.params;
-    const deleted = await deleteRecord("transactions", id);
+    const deleted = await deleteTransactionWithSlipData(id);
     if (!deleted) return notFound("Transaction not found");
     return noContent();
   } catch (error) {

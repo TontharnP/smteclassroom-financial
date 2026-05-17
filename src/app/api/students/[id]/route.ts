@@ -1,4 +1,5 @@
 import { noContent, notFound, ok, serverError } from "@/lib/api/response";
+import { deleteTransactionWithSlipData } from "@/lib/server/transactionDeletion";
 import { deleteRecord, getRecord, listRecords, updateRecord, type Row } from "@/lib/supabase/server";
 import { mapStudent } from "@/lib/supabase/mappers";
 import { linkLineRichMenuByName } from "@/lib/server/line";
@@ -46,7 +47,7 @@ export async function DELETE(_request: Request, context: RouteContext) {
     await Promise.all(
       transactions
         .filter((transaction) => transaction.student_id === id)
-        .map((transaction) => deleteRecord("transactions", String(transaction.id)))
+        .map((transaction) => deleteTransactionWithSlipData(String(transaction.id)))
     );
 
     await deleteRecord("students", id);
