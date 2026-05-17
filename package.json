@@ -11,6 +11,8 @@
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",
     "@supabase/supabase-js": "^2.105.3",
+    "@tesseract.js-data/eng": "^1.0.0",
+    "@tesseract.js-data/tha": "^1.0.0",
     "@types/react-calendar": "^3.9.0",
     "@vercel/blob": "^2.3.3",
     "clsx": "^2.1.1",
@@ -29,6 +31,7 @@
     "recharts": "^3.3.0",
     "sharp": "^0.34.5",
     "swr": "^2.3.6",
+    "tesseract.js": "^7.0.0",
     "uuid": "^13.0.0",
     "zod": "^4.1.12",
     "zustand": "^5.0.8"
