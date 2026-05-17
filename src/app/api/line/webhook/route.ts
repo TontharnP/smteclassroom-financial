@@ -316,7 +316,7 @@ async function handleScheduleSelection(event: LineWebhookEvent, scheduleId: stri
       request.line_user_id === event.source?.userId &&
       request.student_id === student.id &&
       request.schedule_id === scheduleId &&
-      ["selecting", "awaiting_slip"].includes(request.status)
+      ["selecting", "awaiting_slip", "pending_slip_review", "pending_review"].includes(request.status)
     );
 
   await Promise.all(existingRequests.map((request) =>
@@ -570,8 +570,12 @@ async function handleSlipImage(event: LineWebhookEvent, messageId: string) {
     listRecords<Row>("line_payment_requests"),
     listRecords<Row>("line_payment_slip_archives"),
   ]);
+  const duplicateBlockingRequestRows = existingRequestRows.filter((row) =>
+    String(row.id) !== activeRequest.id &&
+    ["pending_slip_review", "pending_review"].includes(String(row.status || ""))
+  );
   const existingSlipRows = [
-    ...existingRequestRows.filter((row) => String(row.id) !== activeRequest.id),
+    ...duplicateBlockingRequestRows,
     ...archivedSlipRows,
   ];
   const duplicateByQr = Boolean(
@@ -602,15 +606,26 @@ async function handleSlipImage(event: LineWebhookEvent, messageId: string) {
   ].filter(Boolean);
   const shouldAutoRejectSlip = autoRejectReasons.length > 0;
   const autoRejectReason = autoRejectReasons.join(" • ");
+  const trueMoneyReceiptQrAllowsFallback =
+    activeRequest.method === "truemoney" &&
+    isTrueMoneyReceiptQrPayload(slipCheck.qrPayload) &&
+    Boolean(slipCheck.slipTransactionId) &&
+    slipCheck.amountMatches !== false;
   const receiverChecksConfigured = expectedReceiverAccounts.length > 0 || Boolean(expectedReceiverName);
   const receiverAllowsAutoApprove =
-    receiverChecksConfigured &&
-    (expectedReceiverAccounts.length === 0 || slipCheck.receiverAccountMatches === true) &&
-    (!expectedReceiverName || slipCheck.receiverNameMatches === true);
+    trueMoneyReceiptQrAllowsFallback ||
+    (
+      receiverChecksConfigured &&
+      (expectedReceiverAccounts.length === 0 || slipCheck.receiverAccountMatches === true) &&
+      (!expectedReceiverName || slipCheck.receiverNameMatches === true)
+    );
+  const amountAllowsAutoApprove =
+    slipCheck.amountMatches === true ||
+    trueMoneyReceiptQrAllowsFallback;
   const canAutoApprove =
     slipCheck.qrReadable &&
     Boolean(slipCheck.slipTransactionId) &&
-    slipCheck.amountMatches === true &&
+    amountAllowsAutoApprove &&
     receiverAllowsAutoApprove &&
     !shouldAutoRejectSlip &&
     !duplicateSuspected;
@@ -1313,6 +1328,12 @@ function getExpectedSlipReceiverAccounts(method: string | undefined) {
     ].flatMap((value) => splitEnvList(value));
 
   return Array.from(new Set(configured.filter(Boolean)));
+}
+
+function isTrueMoneyReceiptQrPayload(payload: string | undefined) {
+  if (!payload) return false;
+
+  return /P2P/i.test(payload) && !payload.includes("A000000677010111");
 }
 
 function getExpectedSlipReceiverName(method: string | undefined) {
