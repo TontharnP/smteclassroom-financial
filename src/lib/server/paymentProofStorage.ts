@@ -1,6 +1,7 @@
 import "server-only";
 
 import { put } from "@vercel/blob";
+import { getRuntimeSettings } from "@/lib/server/appSettings";
 
 export function appUploadUrl(pathname: string) {
   return `/api/uploads?pathname=${encodeURIComponent(pathname)}`;
@@ -17,10 +18,12 @@ export async function storePaymentProofImage({
 }) {
   const extension = extensionFromContentType(contentType);
   const pathname = `payment-slips/${requestId}-${Date.now()}${extension}`;
+  const token = (await getRuntimeSettings()).blobReadWriteToken || undefined;
   const blob = await put(pathname, Buffer.from(data), {
     access: "private",
     contentType: contentType || "image/jpeg",
     allowOverwrite: true,
+    token,
   });
 
   return {

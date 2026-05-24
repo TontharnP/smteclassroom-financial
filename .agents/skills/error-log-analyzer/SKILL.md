@@ -35,4 +35,4 @@ Next.js dynamic API route typing uses `params: Promise<{ id: string }>` in this 
 
 ## Verification
 
-Rerun the failing command or closest targeted command. Use `npm run lint` for lint/type import failures and `npm run build` for App Router, server/client, and deployment failures.
+Rerun the failing command or closest targeted command. Use `npm run lint` for lint/type import failures and `npx next build --webpack` for App Router, server/client, and deployment failures.

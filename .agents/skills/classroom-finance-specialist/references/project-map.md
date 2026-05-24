@@ -15,7 +15,7 @@
 ## Commands
 
 - `npm run dev`: local dev server
-- `npm run build`: production build
+- `npx next build --webpack`: production build validation
 - `npm start`: serve built app
 - `npm run lint`: ESLint
 

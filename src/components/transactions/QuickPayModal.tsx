@@ -8,8 +8,8 @@ import { dbTransactionToTransaction } from "@/lib/supabase/adapter";
 import toast from "react-hot-toast";
 import { QRCodeCanvas } from "qrcode.react";
 import generatePayload from "promptpay-qr";
-
-const PROMPTPAY_ID = "004666006046829";
+import { apiRequest } from "@/lib/api/client";
+import { DEFAULT_PUBLIC_SETTINGS, type AppPublicSettings } from "@/lib/settings/schema";
 
 interface Props {
   isOpen: boolean;
@@ -32,6 +32,7 @@ export function QuickPayModal({ isOpen, onClose, scheduleId, studentId }: Props)
   const [rows, setRows] = useState<Array<{ method: PaymentMethod; amount: number }>>([
     { method: "cash", amount: 0 },
   ]);
+  const [settings, setSettings] = useState<AppPublicSettings>(DEFAULT_PUBLIC_SETTINGS);
 
   const schedule = useMemo(() => data.schedules.find((s) => s.id === scheduleId) || null, [data.schedules, scheduleId]);
   const student = useMemo(() => data.students.find((st) => st.id === studentId) || null, [data.students, studentId]);
@@ -59,6 +60,21 @@ export function QuickPayModal({ isOpen, onClose, scheduleId, studentId }: Props)
       });
     }
   }, [isOpen, remaining]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    let ignore = false;
+    apiRequest<AppPublicSettings>("/api/settings")
+      .then((payload) => {
+        if (!ignore) setSettings(payload);
+      })
+      .catch(() => {
+        if (!ignore) setSettings(DEFAULT_PUBLIC_SETTINGS);
+      });
+    return () => {
+      ignore = true;
+    };
+  }, [isOpen]);
 
   if (!schedule || !student) return null;
 
@@ -173,13 +189,13 @@ export function QuickPayModal({ isOpen, onClose, scheduleId, studentId }: Props)
               {row.method === "kplus" && row.amount > 0 && (
                 <div className="apple-soft col-span-12 my-2 flex flex-col items-center justify-center rounded-[20px] bg-white p-4">
                   <QRCodeCanvas
-                    value={generatePayload(PROMPTPAY_ID, { amount: row.amount })}
+                    value={generatePayload(settings.promptPayId || DEFAULT_PUBLIC_SETTINGS.promptPayId, { amount: row.amount })}
                     size={200}
                     level={"L"}
                     includeMargin={true}
                   />
                   <div className="mt-2 font-semibold text-emerald-600">สแกนจ่าย {row.amount.toLocaleString()} ฿</div>
-                  <div className="text-xs text-zinc-400">PromptPay: {PROMPTPAY_ID}</div>
+                  <div className="text-xs text-zinc-400">PromptPay: {settings.promptPayId || DEFAULT_PUBLIC_SETTINGS.promptPayId}</div>
                 </div>
               )}
             </div>

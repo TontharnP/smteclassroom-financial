@@ -23,7 +23,7 @@ Update docs when changes affect setup, migrations, LINE webhook/rich menu config
 
 ## Important Facts
 
-Commands: `npm install`, `npm run dev`, `npm run build`, `npm start`, `npm run lint`.
+Commands: `npm install`, `npm run dev`, `npx next build --webpack`, `npm start`, `npm run lint`.
 
 Required environment names: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `LINE_CHANNEL_ACCESS_TOKEN`, `LINE_CHANNEL_SECRET`, `BLOB_READ_WRITE_TOKEN`.
 

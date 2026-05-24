@@ -23,7 +23,7 @@ Use lucide-react icons for UI controls when an icon exists. Keep Thai copy natur
 
 Implement complete states when relevant: loading skeletons, empty states, API errors, disabled submitting states, mobile and desktop behavior, hover/focus, and dark mode.
 
-Run `npm run lint` after UI edits. Run `npm run build` when changing routes, imports, client/server boundaries, or shared types.
+Run `npm run lint` after UI edits. Run `npx next build --webpack` when changing routes, imports, client/server boundaries, or shared types.
 
 ## Data And State
 

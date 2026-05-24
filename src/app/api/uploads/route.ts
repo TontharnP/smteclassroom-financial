@@ -1,5 +1,6 @@
 import { del, get, put } from "@vercel/blob";
 import { badRequest, noContent, notFound, ok, serverError } from "@/lib/api/response";
+import { getRuntimeSettings } from "@/lib/server/appSettings";
 
 const uploadFolders = {
   student: "avatars",
@@ -38,7 +39,8 @@ export async function GET(request: Request) {
     const pathname = url.searchParams.get("pathname");
     if (!pathname) return badRequest("pathname is required");
 
-    const blob = await get(pathname, { access: "private" });
+    const token = (await getRuntimeSettings()).blobReadWriteToken || undefined;
+    const blob = await get(pathname, { access: "private", token });
     if (!blob?.stream) return notFound("File not found");
 
     const headers = new Headers();
@@ -67,10 +69,12 @@ export async function POST(request: Request) {
     if (typeof ownerId !== "string" || !ownerId) return badRequest("ownerId is required");
 
     const pathname = `${uploadFolders[kind]}/${ownerId}-${Date.now()}${extensionFromName(file.name)}`;
+    const token = (await getRuntimeSettings()).blobReadWriteToken || undefined;
     const blob = await put(pathname, file, {
       access: "private",
       contentType: file.type || undefined,
       allowOverwrite: true,
+      token,
     });
 
     return ok({ url: appUploadUrl(blob.pathname), pathname: blob.pathname }, 201);
@@ -83,7 +87,8 @@ export async function DELETE(request: Request) {
   try {
     const body = (await request.json()) as { url?: string };
     if (!body.url) return badRequest("url is required");
-    await del(pathnameFromStoredUrl(body.url));
+    const token = (await getRuntimeSettings()).blobReadWriteToken || undefined;
+    await del(pathnameFromStoredUrl(body.url), { token });
     return noContent();
   } catch (error) {
     return serverError(error);

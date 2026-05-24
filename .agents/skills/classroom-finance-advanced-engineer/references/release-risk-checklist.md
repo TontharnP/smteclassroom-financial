@@ -12,12 +12,12 @@
 Use the narrowest useful checks, but do not skip build for release-critical work.
 
 - UI-only: `npm run lint`, browser smoke test when possible.
-- API route: `npm run lint`, `npm run build`, route-level manual request if environment permits.
-- Migration-linked: `npm run lint`, `npm run build`, apply SQL to non-production Supabase when available.
-- LINE webhook: `npm run lint`, `npm run build`, verify signature path and missing-env behavior locally; platform test requires LINE credentials.
-- Upload/Blob: `npm run lint`, `npm run build`, verify missing-token behavior; real upload requires Vercel Blob token.
-- Dependency: `npm install`, `npm run lint`, `npm run build`.
-- Deployment fix: `npm run build` at minimum.
+- API route: `npm run lint`, `npx next build --webpack`, route-level manual request if environment permits.
+- Migration-linked: `npm run lint`, `npx next build --webpack`, apply SQL to non-production Supabase when available.
+- LINE webhook: `npm run lint`, `npx next build --webpack`, verify signature path and missing-env behavior locally; platform test requires LINE credentials.
+- Upload/Blob: `npm run lint`, `npx next build --webpack`, verify missing-token behavior; real upload requires Vercel Blob token.
+- Dependency: `npm install`, `npm run lint`, `npx next build --webpack`.
+- Deployment fix: `npx next build --webpack` at minimum.
 
 ## Release Notes Template
 

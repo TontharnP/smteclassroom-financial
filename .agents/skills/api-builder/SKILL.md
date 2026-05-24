@@ -39,4 +39,4 @@ Vercel Blob upload code must require `BLOB_READ_WRITE_TOKEN` and avoid trusting 
 
 ## Verification
 
-Run `npm run lint` for route and type changes. Run `npm run build` for new routes, dynamic route params, server-only imports, or changed environment assumptions.
+Run `npm run lint` for route and type changes. Run `npx next build --webpack` for new routes, dynamic route params, server-only imports, or changed environment assumptions.

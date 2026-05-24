@@ -15,7 +15,7 @@ Supabase migrations are manual unless the user adds CLI automation. LINE webhook
 
 Gather the failing command, platform log, route, commit context, and whether the failure happens during install, build, server startup, API runtime, webhook call, upload, or cron.
 
-Reproduce locally with `npm run build` when the failure is build-related. Use `npm run lint` for type/import/lint symptoms.
+Reproduce locally with `npx next build --webpack` when the failure is build-related. Use `npm run lint` for type/import/lint symptoms.
 
 Trace environment errors to the exact variable name without printing secret values.
 
@@ -35,4 +35,4 @@ Call out required platform-side changes separately from repo changes.
 
 ## Verification
 
-Run `npm run build` for deployment fixes. If deployment requires network access or platform credentials, state what was verified locally and what remains to check on the host.
+Run `npx next build --webpack` for deployment fixes. If deployment requires network access or platform credentials, state what was verified locally and what remains to check on the host.

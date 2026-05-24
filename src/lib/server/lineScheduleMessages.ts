@@ -2,6 +2,7 @@ import "server-only";
 
 import { getRecord, listRecords, type Row } from "@/lib/supabase/server";
 import { mapSchedule, mapStudent, mapTransaction } from "@/lib/supabase/mappers";
+import { getRuntimeSettings, lineMessage } from "@/lib/server/appSettings";
 
 type ScheduleNoticeKind = "announcement" | "reminder";
 type NoticeStatus = "sent" | "missing_line_id" | "already_paid" | "failed";
@@ -36,7 +37,7 @@ export async function sendScheduleLineNotices({
   studentIds?: string[];
   kind: ScheduleNoticeKind;
 }): Promise<ScheduleLineNoticeResult | null> {
-  const token = process.env.LINE_CHANNEL_ACCESS_TOKEN;
+  const token = (await getRuntimeSettings()).lineChannelAccessToken;
   if (!token) throw new Error("Missing LINE_CHANNEL_ACCESS_TOKEN");
 
   const selectedStudentIds = Array.isArray(studentIds) && studentIds.length > 0
@@ -82,13 +83,14 @@ export async function sendScheduleLineNotices({
     }
 
     try {
+      const footer = await lineMessage(kind === "announcement" ? "scheduleAnnouncementFooter" : "scheduleReminderFooter");
       await pushLineMessage({
         token,
         to: student.line_user_id,
         messages: [
           kind === "announcement"
-            ? buildAnnouncementFlexMessage({ studentName, scheduleName: schedule.name, amount: schedule.amount_per_item, startDate: schedule.start_date, dueDate: schedule.end_date })
-            : buildReminderFlexMessage({ studentName, scheduleName: schedule.name, remaining, dueDate: schedule.end_date }),
+            ? buildAnnouncementFlexMessage({ studentName, scheduleName: schedule.name, amount: schedule.amount_per_item, startDate: schedule.start_date, dueDate: schedule.end_date, footer })
+            : buildReminderFlexMessage({ studentName, scheduleName: schedule.name, remaining, dueDate: schedule.end_date, footer }),
         ],
       });
       recipients.push({ studentId: student.id, studentName, status: "sent", remaining });
@@ -120,12 +122,14 @@ function buildAnnouncementFlexMessage({
   amount,
   startDate,
   dueDate,
+  footer,
 }: {
   studentName: string;
   scheduleName: string;
   amount: number;
   startDate: string;
   dueDate?: string;
+  footer: string;
 }): LineMessage {
   return createFlexMessage(`มีกำหนดการใหม่: ${scheduleName}`, [
     flexHero("กำหนดการใหม่", "#2563EB", "#06B6D4"),
@@ -136,7 +140,7 @@ function buildAnnouncementFlexMessage({
       metricBox("ครบกำหนด", formatThaiDate(dueDate), "#EA580C", "#FFF7ED"),
     ]),
     flexText(`เริ่ม: ${formatThaiDate(startDate)}`, "#6B7280", "sm"),
-    flexText("กดเมนู ชำระเงิน เมื่อต้องการดูรายการและเลือกช่องทางจ่ายได้เลยครับ 💸", "#374151", "sm"),
+    flexText(footer, "#374151", "sm"),
   ]);
 }
 
@@ -145,11 +149,13 @@ function buildReminderFlexMessage({
   scheduleName,
   remaining,
   dueDate,
+  footer,
 }: {
   studentName: string;
   scheduleName: string;
   remaining: number;
   dueDate?: string;
+  footer: string;
 }): LineMessage {
   return createFlexMessage(`แจ้งเตือนชำระเงิน: ${scheduleName}`, [
     flexHero("แจ้งเตือนชำระเงิน", "#EA580C", "#2563EB"),
@@ -159,7 +165,7 @@ function buildReminderFlexMessage({
       metricBox("ยอดค้างชำระ", formatBaht(remaining), "#DC2626", "#FEF2F2"),
       metricBox("ครบกำหนด", formatThaiDate(dueDate), "#EA580C", "#FFF7ED"),
     ]),
-    flexText("อย่าลืมชำระเงินตามกำหนดนะครับ ขอบคุณครับ/ค่ะ 🙏", "#374151", "sm"),
+    flexText(footer, "#374151", "sm"),
   ]);
 }
 

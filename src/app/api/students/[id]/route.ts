@@ -3,12 +3,12 @@ import { deleteTransactionWithSlipData } from "@/lib/server/transactionDeletion"
 import { deleteRecord, getRecord, listRecords, updateRecord, type Row } from "@/lib/supabase/server";
 import { mapStudent } from "@/lib/supabase/mappers";
 import { linkLineRichMenuByName } from "@/lib/server/line";
+import { getRuntimeSettings } from "@/lib/server/appSettings";
 import type { StudentUpdate } from "@/types/supabase";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
 const studentColumns = ["prefix", "first_name", "last_name", "nick_name", "number", "avatar_url", "line_user_id"];
-const REGISTER_RICH_MENU_NAME = "Classroom Finance Register Menu";
 
 export async function GET(_request: Request, context: RouteContext) {
   try {
@@ -29,7 +29,7 @@ export async function PATCH(request: Request, context: RouteContext) {
     const row = await updateRecord<Row>("students", id, body, studentColumns);
     if (!row) return notFound("Student not found");
     if (body.line_user_id === null && previous?.line_user_id) {
-      await linkLineRichMenuByName(String(previous.line_user_id), REGISTER_RICH_MENU_NAME);
+      await linkLineRichMenuByName(String(previous.line_user_id), (await getRuntimeSettings()).lineRegisterRichMenuName);
     }
     return ok(mapStudent(row));
   } catch (error) {

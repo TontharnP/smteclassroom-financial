@@ -19,7 +19,7 @@ For reviews, lead with findings ordered by severity and cite file paths and line
 
 ## Repo-Specific Notes
 
-Common verification commands are `npm run lint` and `npm run build`. There is no test script in `package.json` currently.
+Common verification commands are `npm run lint` and `npx next build --webpack`. There is no test script in `package.json` currently.
 
 Important code areas are `src/app`, `src/components`, `src/lib`, `src/types`, `supabase/migrations`, `docs`, and integration config files.
 

@@ -8,6 +8,7 @@ import jsQR from "jsqr";
 import sharp from "sharp";
 import { recognize } from "tesseract.js";
 import { verifySlipWithEasySlip, type EasySlipVerifyData } from "@/lib/server/easySlip";
+import { getRuntimeSettings } from "@/lib/server/appSettings";
 
 const DEFAULT_OCR_MAX_VARIANTS = 10;
 const OCR_BATCH_SIZE = 2;
@@ -48,6 +49,7 @@ export async function analyzeSlipImage(
   expectedAmount: number,
   options: SlipCheckOptions = {}
 ): Promise<SlipCheckResult> {
+  const settings = await getRuntimeSettings();
   const imageHash = createHash("sha256").update(data).digest("hex");
   const expectedAccounts = normalizeExpectedAccounts(options.expectedReceiverAccounts);
   const transactionAccountExclusions = normalizeExpectedAccounts([
@@ -66,9 +68,9 @@ export async function analyzeSlipImage(
   });
   const easySlipData = easySlip.ok ? easySlip.data : undefined;
   const easySlipConfigured = easySlip.provider !== "none";
-  const allowLocalEvidence = !easySlipConfigured || process.env.EASYSLIP_ALWAYS_RUN_LOCAL_OCR === "true";
-  const shouldRunLocalOcr = allowLocalEvidence && (!easySlip.ok || process.env.EASYSLIP_ALWAYS_RUN_LOCAL_OCR === "true");
-  let ocrText = shouldRunLocalOcr ? await readOcrText(data) : undefined;
+  const allowLocalEvidence = !easySlipConfigured || settings.easySlipAlwaysRunLocalOcr;
+  const shouldRunLocalOcr = allowLocalEvidence && (!easySlip.ok || settings.easySlipAlwaysRunLocalOcr);
+  let ocrText = shouldRunLocalOcr ? await readOcrText(data, settings.slipOcrLang, Number(settings.slipOcrMaxVariants)) : undefined;
   const easySlipText = easySlipData ? stringifyEasySlipSearchText(easySlipData) : "";
   const easySlipAmount = easySlipData ? extractEasySlipAmount(easySlipData) : undefined;
   const easySlipPayload = easySlipData?.rawSlip?.payload;
@@ -76,7 +78,7 @@ export async function analyzeSlipImage(
   const qrAmount = qrPayload ? extractEmvAmount(qrPayload) : undefined;
   let ocrAmount = extractAmountFromText(ocrText, expectedAmount);
   if (allowLocalEvidence && !easySlip.ok && options.paymentMethod === "truemoney" && typeof ocrAmount !== "number") {
-    const fallbackOcrText = await readLegacyOcrText(data);
+    const fallbackOcrText = await readLegacyOcrText(data, settings.slipOcrLang);
     ocrText = mergeTextValues(ocrText, fallbackOcrText);
     ocrAmount = extractAmountFromText(ocrText, expectedAmount);
   }
@@ -180,12 +182,11 @@ async function readSingleQrPayload(data: Buffer) {
   return jsQR(pixels, image.info.width, image.info.height)?.data;
 }
 
-async function readOcrText(data: Buffer) {
+async function readOcrText(data: Buffer, lang = "eng+tha", maxVariantOverride?: number) {
   try {
-    const lang = process.env.SLIP_OCR_LANG || "eng+tha";
     const langPath = ensureLocalTessdata(lang);
     const variants = await buildOcrVariants(data);
-    const maxVariants = getOcrMaxVariants();
+    const maxVariants = getOcrMaxVariants(maxVariantOverride);
     const selectedVariants = variants.slice(0, maxVariants);
     const results = await runOcrVariants(selectedVariants, lang, langPath);
 
@@ -211,9 +212,8 @@ async function readOcrText(data: Buffer) {
   }
 }
 
-async function readLegacyOcrText(data: Buffer) {
+async function readLegacyOcrText(data: Buffer, lang = "eng+tha") {
   try {
-    const lang = process.env.SLIP_OCR_LANG || "eng+tha";
     const langPath = ensureLocalTessdata(lang);
     const metadata = await sharp(data).rotate().metadata();
     const prepared = await sharp(data)
@@ -456,8 +456,8 @@ function normalizeCommonOcrMistakes(value: string) {
     .trim();
 }
 
-function getOcrMaxVariants() {
-  const value = Number(process.env.SLIP_OCR_MAX_VARIANTS || DEFAULT_OCR_MAX_VARIANTS);
+function getOcrMaxVariants(override?: number) {
+  const value = Number(override || DEFAULT_OCR_MAX_VARIANTS);
   return Number.isFinite(value) && value > 0 ? Math.floor(value) : DEFAULT_OCR_MAX_VARIANTS;
 }
 

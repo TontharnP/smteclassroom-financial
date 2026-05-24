@@ -7,7 +7,7 @@ description: Upgrade, replace, or audit dependencies in the Classroom Finance pr
 
 ## Project Context
 
-This repo uses npm with `package-lock.json`. Scripts are `npm run dev`, `npm run build`, `npm start`, and `npm run lint`.
+This repo uses npm with `package-lock.json`. Scripts are `npm run dev`, `npm start`, and `npm run lint`. Use `npx next build --webpack` for production build validation.
 
 Key dependencies: Next.js 16, React 19, TypeScript 5, Tailwind CSS v4 with `@tailwindcss/postcss`, Supabase JS v2, Vercel Blob, Framer Motion, Recharts, react-calendar, react-hook-form, Zod v4, Zustand v5, lucide-react, promptpay-qr, qrcode.react, and uuid.
 
@@ -29,4 +29,4 @@ Vulnerability fixes must not expose secrets or change payment/LINE behavior with
 
 ## Verification
 
-Run `npm install` after manifest changes, then `npm run lint` and `npm run build`. Note unresolved peer warnings or skipped migration steps.
+Run `npm install` after manifest changes, then `npm run lint` and `npx next build --webpack`. Note unresolved peer warnings or skipped migration steps.

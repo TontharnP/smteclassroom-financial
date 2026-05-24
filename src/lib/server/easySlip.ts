@@ -1,5 +1,7 @@
 import "server-only";
 
+import { getRuntimeSettings } from "@/lib/server/appSettings";
+
 const EASYSLIP_BASE_URL = "https://api.easyslip.com/v2";
 const MAX_IMAGE_SIZE_BYTES = 4 * 1024 * 1024;
 
@@ -70,7 +72,8 @@ export async function verifySlipWithEasySlip({
   paymentMethod?: string;
   remark?: string;
 }): Promise<EasySlipVerifyResult> {
-  const apiKey = process.env.EASYSLIP_API_KEY?.trim();
+  const settings = await getRuntimeSettings();
+  const apiKey = settings.easySlipApiKey;
   if (!apiKey) {
     return {
       ok: false,
@@ -88,6 +91,8 @@ export async function verifySlipWithEasySlip({
       qrPayload,
       expectedAmount,
       remark,
+      checkDuplicate: settings.easySlipCheckDuplicate,
+      matchAccount: settings.easySlipMatchAccount,
     });
     if (payloadResult.ok || !payloadResult.retryable) return payloadResult;
   }
@@ -99,6 +104,8 @@ export async function verifySlipWithEasySlip({
     expectedAmount,
     paymentMethod,
     remark,
+    checkDuplicate: settings.easySlipCheckDuplicate,
+    matchAccount: settings.easySlipMatchAccount,
   });
 }
 
@@ -107,17 +114,21 @@ async function verifyBankPayloadWithEasySlip({
   qrPayload,
   expectedAmount,
   remark,
+  checkDuplicate,
+  matchAccount,
 }: {
   apiKey: string;
   qrPayload: string;
   expectedAmount: number;
   remark?: string;
+  checkDuplicate: boolean;
+  matchAccount: boolean;
 }): Promise<EasySlipVerifyResult> {
   const body = JSON.stringify({
     payload: qrPayload,
     matchAmount: expectedAmount,
-    checkDuplicate: process.env.EASYSLIP_CHECK_DUPLICATE !== "false",
-    matchAccount: process.env.EASYSLIP_MATCH_ACCOUNT !== "false",
+    checkDuplicate,
+    matchAccount,
     ...(remark ? { remark: remark.slice(0, 255) } : {}),
   });
 
@@ -137,6 +148,8 @@ async function verifyImageWithEasySlip({
   expectedAmount,
   paymentMethod,
   remark,
+  checkDuplicate,
+  matchAccount,
 }: {
   apiKey: string;
   data: Buffer;
@@ -144,6 +157,8 @@ async function verifyImageWithEasySlip({
   expectedAmount: number;
   paymentMethod?: string;
   remark?: string;
+  checkDuplicate: boolean;
+  matchAccount: boolean;
 }): Promise<EasySlipVerifyResult> {
   if (data.byteLength > MAX_IMAGE_SIZE_BYTES) {
     return {
@@ -161,8 +176,8 @@ async function verifyImageWithEasySlip({
   const blob = new Blob([new Uint8Array(data)], { type: contentType || "image/jpeg" });
   formData.append("image", blob, filenameFromContentType(contentType));
   formData.append("matchAmount", String(expectedAmount));
-  formData.append("checkDuplicate", process.env.EASYSLIP_CHECK_DUPLICATE === "false" ? "false" : "true");
-  formData.append("matchAccount", process.env.EASYSLIP_MATCH_ACCOUNT === "false" ? "false" : "true");
+  formData.append("checkDuplicate", checkDuplicate ? "true" : "false");
+  formData.append("matchAccount", matchAccount ? "true" : "false");
   if (remark) formData.append("remark", remark.slice(0, 255));
 
   const endpoint = paymentMethod === "truemoney" ? "/verify/truewallet" : "/verify/bank";

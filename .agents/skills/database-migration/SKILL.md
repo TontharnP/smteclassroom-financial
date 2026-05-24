@@ -35,4 +35,4 @@ Keep LINE and payment data referential integrity clear. Existing `line_payment_r
 
 ## Verification
 
-Run `npm run lint` after TypeScript changes and `npm run build` after schema-linked type or route changes. If a real Supabase database is available, apply migrations to a non-production project first.
+Run `npm run lint` after TypeScript changes and `npx next build --webpack` after schema-linked type or route changes. If a real Supabase database is available, apply migrations to a non-production project first.

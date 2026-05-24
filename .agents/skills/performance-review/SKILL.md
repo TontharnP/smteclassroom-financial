@@ -33,4 +33,4 @@ For images, keep uploaded student avatars and payment proofs efficient and avoid
 
 ## Verification
 
-Run the smallest relevant command: `npm run lint`, `npm run build`, local page smoke test, API timing comparison, or query plan when a database is available. Report any performance claim that was inferred rather than measured.
+Run the smallest relevant command: `npm run lint`, `npx next build --webpack`, local page smoke test, API timing comparison, or query plan when a database is available. Report any performance claim that was inferred rather than measured.

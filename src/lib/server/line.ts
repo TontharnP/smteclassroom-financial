@@ -1,5 +1,7 @@
 import "server-only";
 
+import { getRuntimeSettings } from "@/lib/server/appSettings";
+
 type LineRichMenuSummary = {
   richMenuId?: string;
   name?: string;
@@ -10,7 +12,7 @@ export async function pushLineText(lineUserId: string | undefined, text: string)
 }
 
 export async function pushLineMessages(lineUserId: string | undefined, messages: Record<string, unknown>[]) {
-  const token = process.env.LINE_CHANNEL_ACCESS_TOKEN;
+  const token = (await getRuntimeSettings()).lineChannelAccessToken;
   if (!token || !lineUserId) return { ok: false, error: "Missing LINE token or user id" };
 
   const response = await fetch("https://api.line.me/v2/bot/message/push", {
@@ -34,7 +36,7 @@ export async function pushLineMessages(lineUserId: string | undefined, messages:
 }
 
 export async function linkLineRichMenu(lineUserId: string | undefined, richMenuId: string | undefined) {
-  const token = process.env.LINE_CHANNEL_ACCESS_TOKEN;
+  const token = (await getRuntimeSettings()).lineChannelAccessToken;
   if (!token || !lineUserId || !richMenuId) return { ok: false, error: "Missing LINE token, user id, or rich menu id" };
 
   const response = await fetch(`https://api.line.me/v2/bot/user/${lineUserId}/richmenu/${richMenuId}`, {
@@ -53,7 +55,7 @@ export async function linkLineRichMenu(lineUserId: string | undefined, richMenuI
 }
 
 export async function linkLineRichMenuByName(lineUserId: string | undefined, richMenuName: string) {
-  const token = process.env.LINE_CHANNEL_ACCESS_TOKEN;
+  const token = (await getRuntimeSettings()).lineChannelAccessToken;
   if (!token || !lineUserId) return { ok: false, error: "Missing LINE token or user id" };
 
   const listResponse = await fetch("https://api.line.me/v2/bot/richmenu/list", {
@@ -76,7 +78,7 @@ export async function linkLineRichMenuByName(lineUserId: string | undefined, ric
 }
 
 export async function unlinkLineRichMenu(lineUserId: string | undefined) {
-  const token = process.env.LINE_CHANNEL_ACCESS_TOKEN;
+  const token = (await getRuntimeSettings()).lineChannelAccessToken;
   if (!token || !lineUserId) return { ok: false, error: "Missing LINE token or user id" };
 
   const response = await fetch(`https://api.line.me/v2/bot/user/${lineUserId}/richmenu`, {

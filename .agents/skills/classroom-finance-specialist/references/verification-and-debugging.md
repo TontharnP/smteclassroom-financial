@@ -4,7 +4,7 @@
 
 Run `npm run lint` after most TypeScript, React, API, and docs-with-code changes.
 
-Run `npm run build` when changing:
+Run `npx next build --webpack` when changing:
 
 - App Router pages or API routes
 - dynamic route params

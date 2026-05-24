@@ -7,11 +7,10 @@ import { analyzeSlipImage } from "@/lib/server/slipCheck";
 import { deleteSlipImages, storeSlipImage } from "@/lib/server/slipStorage";
 import { linkLineRichMenuByName } from "@/lib/server/line";
 import { approveLinePaymentRequest } from "@/lib/server/linePaymentReview";
+import { getRuntimeSettings, lineMessage } from "@/lib/server/appSettings";
+import { DEFAULT_PUBLIC_SETTINGS, type AppPublicSettings } from "@/lib/settings/schema";
 
-const PROMPTPAY_ID = "004666006046829";
-
-const TRUEMONEY_TEMPLATE_PREFIX = "00020101021229390016A000000677010111031514000098913543353037645";
-const TRUEMONEY_TEMPLATE_SUFFIX = "5802TH6304";
+const DEFAULT_SETTINGS = DEFAULT_PUBLIC_SETTINGS;
 
 function crc16CcittFalse(data: string): string {
   let crc = 0xFFFF;
@@ -25,15 +24,13 @@ function crc16CcittFalse(data: string): string {
   return crc.toString(16).toUpperCase().padStart(4, "0");
 }
 
-function generateTrueMoneyPayload(amount: number): string {
+function generateTrueMoneyPayload(amount: number, settings: AppPublicSettings): string {
   const amountStr = amount.toFixed(2);
   const amountLength = amountStr.length.toString().padStart(2, "0");
-  const dataWithoutCrc = `${TRUEMONEY_TEMPLATE_PREFIX}4${amountLength}${amountStr}${TRUEMONEY_TEMPLATE_SUFFIX}`;
+  const dataWithoutCrc = `${settings.trueMoneyTemplatePrefix}4${amountLength}${amountStr}${settings.trueMoneyTemplateSuffix}`;
   const crc = crc16CcittFalse(dataWithoutCrc);
   return `${dataWithoutCrc}${crc}`;
 }
-const REGISTERED_RICH_MENU_NAME = "Classroom Finance Student Menu";
-const REGISTER_RICH_MENU_NAME = "Classroom Finance Register Menu";
 
 type LineWebhookBody = {
   events?: LineWebhookEvent[];
@@ -71,7 +68,7 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    const channelSecret = process.env.LINE_CHANNEL_SECRET;
+    const channelSecret = (await getRuntimeSettings()).lineChannelSecret;
     if (!channelSecret) return badRequest("Missing LINE_CHANNEL_SECRET");
 
     const bodyText = await request.text();
@@ -108,7 +105,8 @@ async function handleLineEvent(event: LineWebhookEvent) {
   if (event.message?.type !== "text") return;
 
   const text = event.message.text?.trim() || "";
-  if (isPayCommand(text)) {
+  const settings = await getRuntimeSettings();
+  if (isPayCommand(text, settings)) {
     await showPayMenu(event);
     return;
   }
@@ -116,15 +114,15 @@ async function handleLineEvent(event: LineWebhookEvent) {
     await cancelActivePayment(event);
     return;
   }
-  if (isStatusCommand(text)) {
+  if (isStatusCommand(text, settings)) {
     await showStudentStatus(event);
     return;
   }
-  if (isHistoryCommand(text)) {
+  if (isHistoryCommand(text, settings)) {
     await showStudentHistory(event);
     return;
   }
-  if (isTotalCommand(text)) {
+  if (isTotalCommand(text, settings)) {
     await showClassroomTotal(event);
     return;
   }
@@ -141,7 +139,7 @@ async function handleLineEvent(event: LineWebhookEvent) {
     }
   }
 
-  if (isCoreTextCommand(text) || isRegistrationText(text) || text.startsWith("pay:")) {
+  if (isCoreTextCommand(text, settings) || isRegistrationText(text, settings) || text.startsWith("pay:")) {
     await handleAction(event, text);
   }
 }
@@ -150,34 +148,23 @@ async function handleAction(event: LineWebhookEvent, action: string) {
   if (!event.source?.userId) return;
   const normalized = action.trim();
   const number = parseRegistrationNumber(normalized);
+  const settings = await getRuntimeSettings();
 
   if (!number) {
-    if (isRegistrationHelpCommand(normalized)) {
+    if (isRegistrationHelpCommand(normalized, settings)) {
       const registeredStudent = await getStudentByLineUserId(event.source.userId);
       if (registeredStudent) {
-        const menuLink = await linkLineRichMenuByName(event.source.userId, REGISTERED_RICH_MENU_NAME);
-        await replyLineText(event.replyToken, [
-          "บัญชี LINE นี้ลงทะเบียนไว้แล้วครับ ✅",
-          "ไม่ต้องสมัครซ้ำ บอทจำได้อยู่น้า",
-          "",
-          `${registeredStudent.prefix} ${registeredStudent.first_name} ${registeredStudent.last_name}`,
-          `เลขที่ ${registeredStudent.number}`,
-          "",
-          menuLink.ok ? "เมนูถูกเปลี่ยนเป็น ชำระเงิน / สถานะ / ประวัติ / ยอดรวม แล้วครับ" : "ยังเปลี่ยนเมนูไม่ได้ กรุณาให้เหรัญญิกรันตั้งค่า Rich Menu อีกครั้งนะครับ",
-          "ถ้าต้องการเปลี่ยนเป็นคนอื่น ต้องให้เหรัญญิกลบ LINE User ID ในระบบก่อนนะครับ",
-        ].join("\n"));
+        const menuLink = await linkLineRichMenuByName(event.source.userId, settings.lineRegisteredRichMenuName);
+        await replyLineText(event.replyToken, await lineMessage("alreadyRegistered", {
+          studentName: studentDisplayName(registeredStudent),
+          studentNumber: registeredStudent.number,
+          menuStatus: menuLink.ok ? "เมนูพร้อมใช้งานแล้วครับ" : "ยังเปลี่ยนเมนูไม่ได้ กรุณาให้เหรัญญิกรันตั้งค่า Rich Menu อีกครั้งนะครับ",
+        }));
         return;
       }
 
-      await linkLineRichMenuByName(event.source.userId, REGISTER_RICH_MENU_NAME);
-      await replyLineText(event.replyToken, [
-        "มาลงทะเบียน LINE กับระบบการเงินห้องเรียนกันครับ ✨",
-        "พิมพ์เลขที่ของตัวเองตามตัวอย่างนี้ได้เลย",
-        "",
-        "ตัวอย่าง : 24",
-        "",
-        "พอลงทะเบียนเสร็จ จะกดเมนู ชำระเงิน ต่อได้ทันทีครับ 🚀",
-      ].join("\n"));
+      await linkLineRichMenuByName(event.source.userId, settings.lineRegisterRichMenuName);
+      await replyLineText(event.replyToken, await lineMessage("registrationIntro"));
       return;
     }
     if (normalized.startsWith("pay:schedule:")) {
@@ -202,65 +189,37 @@ async function handleAction(event: LineWebhookEvent, action: string) {
   const students = studentRows.map(mapStudent);
   const registeredStudent = students.find((item) => item.line_user_id === event.source?.userId);
   if (registeredStudent) {
-    const menuLink = await linkLineRichMenuByName(event.source.userId, REGISTERED_RICH_MENU_NAME);
-    const isSameNumber = registeredStudent.number === number;
-    await replyLineText(event.replyToken, [
-      "บัญชี LINE นี้ลงทะเบียนไว้แล้วครับ ✅",
-      isSameNumber ? "คนนี้แหละ ใช่เลย ไม่ต้องลงซ้ำแล้วน้า" : "ตอนนี้ผูกอยู่กับ",
-      "",
-      `${registeredStudent.prefix} ${registeredStudent.first_name} ${registeredStudent.last_name}`,
-      `เลขที่ ${registeredStudent.number}`,
-      "",
-      menuLink.ok ? (isSameNumber ? "กดเมนู ชำระเงิน ใช้งานต่อได้เลยครับ 💸" : "เมนูถูกเปลี่ยนเป็น ชำระเงิน / สถานะ / ประวัติ / ยอดรวม แล้วครับ") : "ยังเปลี่ยนเมนูไม่ได้ กรุณาให้เหรัญญิกรันตั้งค่า Rich Menu อีกครั้งนะครับ",
-      isSameNumber
-        ? ""
-        : "เพื่อความปลอดภัย บัญชี LINE เดียวจะเปลี่ยนไปเป็นคนอื่นเองไม่ได้ครับ 🔐\nถ้าต้องการเปลี่ยนจริง ๆ ให้เหรัญญิกลบ LINE User ID ในระบบก่อนนะครับ",
-    ].join("\n"));
+    const menuLink = await linkLineRichMenuByName(event.source.userId, settings.lineRegisteredRichMenuName);
+    await replyLineText(event.replyToken, await lineMessage("alreadyRegistered", {
+      studentName: studentDisplayName(registeredStudent),
+      studentNumber: registeredStudent.number,
+      menuStatus: menuLink.ok ? "กดเมนู ชำระเงิน ใช้งานต่อได้เลยครับ 💸" : "ยังเปลี่ยนเมนูไม่ได้ กรุณาให้เหรัญญิกรันตั้งค่า Rich Menu อีกครั้งนะครับ",
+    }));
     return;
   }
 
   const student = students.find((item) => item.number === number);
 
   if (!student) {
-    await replyLineText(event.replyToken, [
-      `ไม่พบนักเรียนเลขที่ ${number} ครับ 🧐`,
-      "เหมือนเลขที่จะยังไม่อยู่ในระบบ หรืออาจพิมพ์ผิดนิดนึง",
-      "",
-      "ลองตรวจสอบเลขที่ แล้วส่งใหม่แบบนี้ได้เลย",
-      `ลงทะเบียน ${number}`,
-    ].join("\n"));
+    await replyLineText(event.replyToken, await lineMessage("registrationNotFound", { studentNumber: number }));
     return;
   }
 
   if (student.line_user_id && student.line_user_id !== event.source.userId) {
-    await replyLineText(event.replyToken, [
-      `เลขที่ ${student.number} มีบัญชี LINE ลงทะเบียนไว้แล้วครับ 👀`,
-      "",
-      "ถ้าต้องการเปลี่ยนไปใช้บัญชี LINE นี้แทน",
-      "ให้เหรัญญิกลบ LINE User ID เดิมของนักเรียนคนนี้ในระบบก่อนนะครับ 🔐",
-    ].join("\n"));
+    await replyLineText(event.replyToken, await lineMessage("registrationStudentTaken", { studentNumber: student.number }));
     return;
   }
 
   await updateRecord<Row>("students", student.id, { line_user_id: event.source.userId }, studentColumns);
-  const menuLink = await linkLineRichMenuByName(event.source.userId, REGISTERED_RICH_MENU_NAME);
+  const menuLink = await linkLineRichMenuByName(event.source.userId, settings.lineRegisteredRichMenuName);
 
-  await replyLineText(event.replyToken, [
-    "ลงทะเบียนสำเร็จแล้วครับ 🎉",
-    menuLink.ok
-      ? "ยินดีต้อนรับเข้าสู่ระบบการเงินห้องเรียนแบบดิจิทัลสุด ๆ"
-      : "ข้อมูลเข้าระบบเรียบร้อย แต่เมนูยังไม่ยอมเปลี่ยนตามนิดนึง 😅",
-    "",
-    `${student.prefix} ${student.first_name} ${student.last_name}`,
-    `เลขที่ ${student.number}${student.nick_name ? ` (${student.nick_name})` : ""}`,
-    "",
-    menuLink.ok
+  await replyLineText(event.replyToken, await lineMessage("registrationSuccess", {
+    studentName: studentDisplayName(student),
+    studentNumber: student.number,
+    menuStatus: menuLink.ok
       ? "เปลี่ยนเมนูเป็น ชำระเงิน / สถานะ / ประวัติ / ยอดรวม ให้เรียบร้อยแล้วครับ"
       : "รบกวนให้เหรัญญิกช่วยรันตั้งค่า Rich Menu อีกครั้งนะครับ",
-    menuLink.ok
-      ? "ต่อไปแจ้งเตือนเรื่องชำระเงินจะส่งมาที่บัญชีนี้นะครับ 🔔"
-      : "ส่วนบัญชีนี้ ระบบจะใช้แจ้งเตือนกำหนดการชำระเงินได้ตามปกติครับ 🔔",
-  ].join("\n"));
+  }));
 }
 
 async function showPayMenu(event: LineWebhookEvent) {
@@ -343,18 +302,13 @@ async function handleAmountSelection(event: LineWebhookEvent, requestId: string,
   const requests = await listRecords<Row>("line_payment_requests");
   const row = requests.find((r) => r.id === requestId);
   if (!row) {
-    await replyLineText(event.replyToken, [
-      "ไม่พบรายการชำระเงินครับ 😅",
-      "รายการอาจหมดอายุ หรือถูกยกเลิกไปแล้ว",
-      "",
-      "เริ่มใหม่ได้โดยพิมพ์ ชำระเงิน",
-    ].join("\n"));
+    await replyLineText(event.replyToken, await lineMessage("paymentNotFound"));
     return;
   }
 
   const request = mapLinePaymentRequest(row);
   if (request.line_user_id !== event.source?.userId) {
-    await replyLineText(event.replyToken, "รายการนี้ไม่ตรงกับบัญชี LINE ของคุณครับ 🔐");
+    await replyLineText(event.replyToken, await lineMessage("paymentWrongLineUser"));
     return;
   }
   if (request.status !== "selecting") {
@@ -470,50 +424,40 @@ function createPaymentMethodBubble(requestId: string, scheduleName: string, amou
 
 async function handleMethodSelection(event: LineWebhookEvent, requestId: string, method: string) {
   if (!["kplus", "truemoney", "cash"].includes(method)) {
-    await replyLineText(event.replyToken, [
-      "วิธีชำระเงินนี้ยังไม่ถูกต้องครับ 🧐",
-      "ลองเลือกจากปุ่มที่ระบบแสดงให้อีกครั้งนะครับ",
-    ].join("\n"));
+    await replyLineText(event.replyToken, await lineMessage("invalidPaymentMethod"));
     return;
   }
 
   const requests = await listRecords<Row>("line_payment_requests");
   const row = requests.find((request) => request.id === requestId);
   if (!row) {
-    await replyLineText(event.replyToken, [
-      "ไม่พบรายการชำระเงินครับ 😅",
-      "รายการอาจหมดอายุ หรือถูกยกเลิกไปแล้ว",
-      "",
-      "เริ่มใหม่ได้โดยพิมพ์ ชำระเงิน",
-    ].join("\n"));
+    await replyLineText(event.replyToken, await lineMessage("paymentNotFound"));
     return;
   }
 
   const request = mapLinePaymentRequest(row);
   if (request.line_user_id !== event.source?.userId) {
-    await replyLineText(event.replyToken, [
-      "รายการนี้ไม่ตรงกับบัญชี LINE ของคุณครับ 🔐",
-      "ระบบเลยไปต่อให้ไม่ได้ เพื่อความปลอดภัยนะครับ",
-    ].join("\n"));
+    await replyLineText(event.replyToken, await lineMessage("paymentWrongLineUser"));
     return;
   }
 
   if (method === "cash") {
     await updateRecord<Row>("line_payment_requests", request.id, { method, status: "cash_pending" }, ["method", "status"]);
     await replyLineMessages(event.replyToken, [
-      createFlexMessage("รับเรื่องชำระเงินสดไว้แล้ว", createCashPaymentBubble(request.amount)),
+      createFlexMessage("รับเรื่องชำระเงินสดไว้แล้ว", createCashPaymentBubble(request.amount, await lineMessage("cashPaymentReceived"))),
     ]);
     return;
   }
 
   await updateRecord<Row>("line_payment_requests", request.id, { method, status: "awaiting_slip" }, ["method", "status"]);
+  const settings = await getRuntimeSettings();
   const payload = method === "truemoney"
-    ? generateTrueMoneyPayload(request.amount)
-    : generatePayload(PROMPTPAY_ID, { amount: request.amount });
-  const qrUrl = `https://quickchart.io/qr?size=600&margin=2&text=${encodeURIComponent(payload)}`;
+    ? generateTrueMoneyPayload(request.amount, settings)
+    : generatePayload(settings.promptPayId || DEFAULT_SETTINGS.promptPayId, { amount: request.amount });
+  const qrUrl = settings.quickChartQrUrlTemplate.replace("{{payload}}", encodeURIComponent(payload));
 
   await replyLineMessages(event.replyToken, [
-    createFlexMessage(`สแกนจ่าย ${formatMethod(method)}`, createQrPaymentBubble(method, request.amount)),
+    createFlexMessage(`สแกนจ่าย ${formatMethod(method)}`, createQrPaymentBubble(method, request.amount, await lineMessage("qrPaymentInstruction"))),
     {
       type: "image",
       originalContentUrl: qrUrl,
@@ -522,23 +466,23 @@ async function handleMethodSelection(event: LineWebhookEvent, requestId: string,
   ]);
 }
 
-function createCashPaymentBubble(amount: number) {
+function createCashPaymentBubble(amount: number, note: string) {
   return flexBubble([
     flexHeader("รับเรื่องชำระเงินสดแล้ว", "นำเงินไปชำระกับเหรัญญิก"),
     flexSeparator(),
     metricBox("ยอดเงิน", formatBaht(amount), "#2563EB", "#EFF6FF", "xxl"),
-    flexText("ระบบจะบันทึกยอดให้หลังจากเหรัญญิกยืนยันในระบบนะครับ 💵", "#374151", "sm"),
+    flexText(note, "#374151", "sm"),
   ]);
 }
 
-function createQrPaymentBubble(method: string, amount: number) {
+function createQrPaymentBubble(method: string, amount: number, instruction: string) {
   const isKplus = method === "kplus";
+  const instructionLines = instruction.split(/\r?\n/).filter(Boolean);
   return flexBubble([
     flexHeader(isKplus ? "สแกนจ่ายผ่าน K PLUS" : "สแกนจ่ายผ่าน TrueMoney", "QR ด้านล่างล็อกยอดเงินไว้แล้ว"),
     flexSeparator(),
     metricBox("ยอดเงิน", formatBaht(amount), isKplus ? "#059669" : "#EA580C", isKplus ? "#ECFDF5" : "#FFF7ED", "xxl"),
-    flexText("จ่ายเสร็จแล้ว ส่งรูปสลิปกลับมาในแชทนี้ได้เลยครับ 📸", "#374151", "sm"),
-    flexText("บอทรอสลิปอยู่น้า", "#6B7280", "xs"),
+    ...instructionLines.map((line, index) => flexText(line, index === 0 ? "#374151" : "#6B7280", index === 0 ? "sm" : "xs")),
   ]);
 }
 
@@ -549,22 +493,20 @@ async function handleSlipImage(event: LineWebhookEvent, messageId: string) {
     .sort((a, b) => b.created_at.localeCompare(a.created_at))[0];
 
   if (!activeRequest) {
-    await replyLineText(event.replyToken, [
-      "ยังไม่มีรายการที่กำลังรอชำระนะครับ 😅",
-      "กรุณากดเมนู ‘ชำระเงิน’ แล้วเลือกรายการที่ต้องการจ่ายก่อนส่งสลิปน้า",
-    ].join("\n"));
+    await replyLineText(event.replyToken, await lineMessage("noActiveSlipRequest"));
     return;
   }
 
   const image = await downloadLineMessageContent(messageId);
   const imageBuffer = Buffer.from(image.data);
-  const expectedReceiverAccounts = getExpectedSlipReceiverAccounts(activeRequest.method);
-  const expectedReceiverName = getExpectedSlipReceiverName(activeRequest.method);
+  const settings = await getRuntimeSettings();
+  const expectedReceiverAccounts = getExpectedSlipReceiverAccounts(activeRequest.method, settings);
+  const expectedReceiverName = getExpectedSlipReceiverName(activeRequest.method, settings);
   const slipCheck = await analyzeSlipImage(imageBuffer, activeRequest.amount, {
     expectedReceiverAccounts,
     expectedReceiverName,
     paymentMethod: activeRequest.method,
-    transactionAccountExclusions: [PROMPTPAY_ID],
+    transactionAccountExclusions: [settings.promptPayId || DEFAULT_SETTINGS.promptPayId],
     contentType: image.contentType,
     remark: `line-payment-request:${activeRequest.id}`,
   });
@@ -591,7 +533,7 @@ async function handleSlipImage(event: LineWebhookEvent, messageId: string) {
   );
   const duplicateSuspected = duplicateByQr || duplicateByHash || duplicateByTransaction || slipCheck.easySlipDuplicate;
   const shouldAutoRejectInvalidImage =
-    process.env.SLIP_AUTO_REJECT_INVALID_IMAGE !== "false" &&
+    settings.slipAutoRejectInvalidImage &&
     !slipCheck.easySlipVerified &&
     !slipCheck.qrReadable &&
     !slipCheck.slipTransactionId &&
@@ -600,7 +542,7 @@ async function handleSlipImage(event: LineWebhookEvent, messageId: string) {
     slipCheck.receiverNameMatches !== true;
   const canAutoRejectReceiverMismatch =
     activeRequest.method !== "truemoney" ||
-    process.env.TRUEMONEY_AUTO_REJECT_RECEIVER_MISMATCH === "true";
+    settings.trueMoneyAutoRejectReceiverMismatch;
   const autoRejectReasons = [
     slipCheck.amountMatches === false ? "ยอดเงินในสลิปไม่ตรงกับยอดที่เลือกไว้" : "",
     canAutoRejectReceiverMismatch && slipCheck.receiverAccountMatches === false ? "บัญชีปลายทางไม่ตรงกับที่ตั้งค่าไว้" : "",
@@ -609,22 +551,8 @@ async function handleSlipImage(event: LineWebhookEvent, messageId: string) {
   ].filter(Boolean);
   const shouldAutoRejectSlip = autoRejectReasons.length > 0;
   const autoRejectReason = autoRejectReasons.join(" • ");
-  const receiverChecksConfigured = expectedReceiverAccounts.length > 0 || Boolean(expectedReceiverName);
-  const receiverAllowsAutoApprove =
-    receiverChecksConfigured &&
-    (
-      activeRequest.method === "truemoney"
-        ? (!expectedReceiverName || slipCheck.receiverNameMatches === true)
-        : (expectedReceiverAccounts.length === 0 || slipCheck.receiverAccountMatches === true) &&
-          (!expectedReceiverName || slipCheck.receiverNameMatches === true)
-    );
-  const canAutoApprove =
-    (slipCheck.easySlipVerified || slipCheck.qrReadable) &&
-    Boolean(slipCheck.slipTransactionId) &&
-    slipCheck.amountMatches === true &&
-    receiverAllowsAutoApprove &&
-    !shouldAutoRejectSlip &&
-    !duplicateSuspected;
+  // บังคับให้ผ่านการตรวจสอบและอนุมัติโดยเหรัญญิก (Treasurer approval) เสมอ
+  const canAutoApprove = false;
   const slipStatus = shouldAutoRejectSlip
     ? "rejected"
     : duplicateSuspected
@@ -699,37 +627,19 @@ async function handleSlipImage(event: LineWebhookEvent, messageId: string) {
       reviewerLineUserId: "system-auto-slip",
       notifyStudent: false,
     });
-    await replyLineText(event.replyToken, [
-      "สลิปผ่านแล้วครับ ✅",
-      "ระบบตรวจสอบสลิปอัตโนมัติเรียบร้อย",
-      "ชำระเงินเรียบร้อย ขอบคุณมากครับ 🙌",
-    ].join("\n"));
+    await replyLineText(event.replyToken, await lineMessage("slipAutoApproved"));
     return;
   }
 
   if (shouldAutoRejectSlip) {
-    await replyLineText(event.replyToken, [
-      "สลิปยังไม่ผ่านการตรวจสอบนะครับ",
-      autoRejectReason,
-      "กรุณาส่งสลิปใหม่ที่ยอดเงินและบัญชีปลายทางถูกต้องอีกครั้ง",
-    ].join("\n"));
+    await replyLineText(event.replyToken, await lineMessage("slipAutoRejected", { reason: autoRejectReason }));
     await cleanupAutoRejectedPaymentRequest(activeRequest.id, proof.pathname);
     return;
   }
 
   await replyLineText(event.replyToken, duplicateSuspected
-    ? [
-      "สลิปนี้เหมือนเคยถูกส่งมาแล้วนะครับ 🧐",
-      "ระบบบันทึกไว้ให้เหรัญญิกตรวจสอบอีกครั้ง",
-      "ถ้าเป็นสลิปใหม่จริง ๆ ไม่ต้องกังวลครับ",
-    ].join("\n")
-    : [
-      "ได้รับสลิปแล้วครับ ✅",
-      "ระบบบันทึกสลิปเรียบร้อย",
-      "",
-      "สถานะตอนนี้: รอเหรัญญิกตรวจสอบ 🧾",
-      "ถ้าตรวจผ่าน ระบบจะแจ้งยืนยันให้อีกครั้งนะครับ",
-    ].join("\n")
+    ? await lineMessage("slipDuplicateSuspected")
+    : await lineMessage("slipPendingReview")
   );
 }
 
@@ -757,18 +667,12 @@ async function cancelActivePayment(event: LineWebhookEvent) {
     );
 
   if (activeRequests.length === 0) {
-    await replyLineText(event.replyToken, [
-      "ตอนนี้ไม่มีรายการชำระเงินที่กำลังดำเนินการอยู่ครับ 👀",
-      "ไม่มีอะไรให้ยกเลิกแล้วน้า",
-    ].join("\n"));
+    await replyLineText(event.replyToken, await lineMessage("paymentCancelEmpty"));
     return;
   }
 
   await Promise.all(activeRequests.map((request) => deleteRecord("line_payment_requests", request.id)));
-  await replyLineText(event.replyToken, [
-    "ยกเลิกรายการชำระเงินให้เรียบร้อยแล้วครับ ✅",
-    "รายการนี้พักก่อน",
-  ].join("\n"));
+  await replyLineText(event.replyToken, await lineMessage("paymentCancelSuccess"));
 }
 
 async function showStudentStatus(event: LineWebhookEvent) {
@@ -1174,48 +1078,46 @@ function parseRegistrationNumber(text: string) {
   return Number.isInteger(number) && number > 0 ? number : null;
 }
 
-function isPayCommand(text: string) {
-  return ["ชำระเงิน", "จ่ายเงิน", "pay", "PAY_MENU"].includes(text.trim());
+function isPayCommand(text: string, settings?: AppPublicSettings) {
+  return matchesCommand(text, ["ชำระเงิน", "จ่ายเงิน", "pay", "PAY_MENU", settings?.linePayAction.text]);
 }
 
 function isCancelCommand(text: string) {
   return ["ยกเลิก", "cancel", "CANCEL_PAYMENT"].includes(text.trim());
 }
 
-function isRegistrationHelpCommand(text: string) {
-  return ["ลงทะเบียน"].includes(text.trim());
+function isRegistrationHelpCommand(text: string, settings?: AppPublicSettings) {
+  return matchesCommand(text, ["ลงทะเบียน", settings?.lineRegisterAction.text]);
 }
 
-function isStatusCommand(text: string) {
-  return ["เมนูสถานะ", "สถานะ", "STATUS_MENU"].includes(text.trim());
+function isStatusCommand(text: string, settings?: AppPublicSettings) {
+  return matchesCommand(text, ["เมนูสถานะ", "สถานะ", "STATUS_MENU", settings?.lineStatusAction.text]);
 }
 
-function isHistoryCommand(text: string) {
-  return ["เมนูประวัติ", "ประวัติ", "HISTORY_MENU"].includes(text.trim());
+function isHistoryCommand(text: string, settings?: AppPublicSettings) {
+  return matchesCommand(text, ["เมนูประวัติ", "ประวัติ", "HISTORY_MENU", settings?.lineHistoryAction.text]);
 }
 
-function isTotalCommand(text: string) {
-  return ["เมนูยอดรวม", "ยอดรวม", "TOTAL_MENU"].includes(text.trim());
+function isTotalCommand(text: string, settings?: AppPublicSettings) {
+  return matchesCommand(text, ["เมนูยอดรวม", "ยอดรวม", "TOTAL_MENU", settings?.lineTotalAction.text]);
 }
 
-function isCoreTextCommand(text: string) {
-  return isPayCommand(text) || isCancelCommand(text) || isStatusCommand(text) || isHistoryCommand(text) || isTotalCommand(text);
+function isCoreTextCommand(text: string, settings?: AppPublicSettings) {
+  return isPayCommand(text, settings) || isCancelCommand(text) || isStatusCommand(text, settings) || isHistoryCommand(text, settings) || isTotalCommand(text, settings);
 }
 
-function isRegistrationText(text: string) {
-  return isRegistrationHelpCommand(text) || parseRegistrationNumber(text) !== null;
+function isRegistrationText(text: string, settings?: AppPublicSettings) {
+  return isRegistrationHelpCommand(text, settings) || parseRegistrationNumber(text) !== null;
+}
+
+function matchesCommand(text: string, commands: Array<string | undefined>) {
+  const normalized = text.trim();
+  return commands.some((command) => command?.trim() === normalized);
 }
 
 async function replyRegisterPrompt(event: LineWebhookEvent) {
-  await linkLineRichMenuByName(event.source?.userId, REGISTER_RICH_MENU_NAME);
-  await replyLineText(event.replyToken, [
-    "ยังไม่ได้ลงทะเบียน LINE กับระบบการเงินห้องเรียนนะครับ 👀",
-    "กดเมนู ลงทะเบียน แล้วพิมพ์เลขที่ของตัวเองได้เลย",
-    "",
-    "เช่น ลงทะเบียน 24",
-    "",
-    "ลงทะเบียนแป๊บเดียว แล้วค่อยไปจ่ายเงินกันต่อครับ 💸",
-  ].join("\n"));
+  await linkLineRichMenuByName(event.source?.userId, (await getRuntimeSettings()).lineRegisterRichMenuName);
+  await replyLineText(event.replyToken, await lineMessage("mustRegister"));
 }
 
 async function getStudentByLineUserId(lineUserId: string | undefined) {
@@ -1328,26 +1230,25 @@ function buildAutoCheckResult({
   return parts.join(" • ");
 }
 
-function getExpectedSlipReceiverAccounts(method: string | undefined) {
+function getExpectedSlipReceiverAccounts(method: string | undefined, settings: AppPublicSettings) {
   const configured = method === "truemoney"
     ? [
-      process.env.TRUEMONEY_RECEIVER_ACCOUNT_NUMBER,
-      process.env.TRUEMONEY_RECEIVER_ACCOUNT_NUMBERS,
+      settings.trueMoneyReceiverPhone,
     ].flatMap((value) => splitEnvList(value))
     : [
-      PROMPTPAY_ID,
-      process.env.SLIP_RECEIVER_ACCOUNT_NUMBER,
-      process.env.SLIP_RECEIVER_ACCOUNT_NUMBERS,
+      settings.promptPayId || DEFAULT_SETTINGS.promptPayId,
+      settings.bankReceiverAccount,
+      settings.bankReceiverPromptPay,
     ].flatMap((value) => splitEnvList(value));
 
   return Array.from(new Set(configured.filter(Boolean)));
 }
 
-function getExpectedSlipReceiverName(method: string | undefined) {
+function getExpectedSlipReceiverName(method: string | undefined, settings: AppPublicSettings) {
   return (
     method === "truemoney"
-      ? process.env.TRUEMONEY_RECEIVER_ACCOUNT_NAME?.trim() || process.env.SLIP_RECEIVER_ACCOUNT_NAME?.trim()
-      : process.env.SLIP_RECEIVER_ACCOUNT_NAME?.trim()
+      ? settings.trueMoneyReceiverName.trim() || settings.bankReceiverName.trim()
+      : settings.bankReceiverName.trim()
   ) || undefined;
 }
 
@@ -1360,6 +1261,10 @@ function splitEnvList(value: string | undefined) {
 
 function truncateLabel(label: string, maxLength: number) {
   return label.length > maxLength ? `${label.slice(0, maxLength - 1)}…` : label;
+}
+
+function studentDisplayName(student: ReturnType<typeof mapStudent>) {
+  return `${student.prefix} ${student.first_name} ${student.last_name}`.trim();
 }
 
 function formatBaht(amount: number) {
@@ -1411,7 +1316,7 @@ async function replyLineText(replyToken: string | undefined, text: string) {
 }
 
 async function replyLineMessages(replyToken: string | undefined, messages: Array<Record<string, unknown>>) {
-  const token = process.env.LINE_CHANNEL_ACCESS_TOKEN;
+  const token = (await getRuntimeSettings()).lineChannelAccessToken;
   if (!token || !replyToken) return;
 
   const response = await fetch("https://api.line.me/v2/bot/message/reply", {
@@ -1433,7 +1338,7 @@ async function replyLineMessages(replyToken: string | undefined, messages: Array
 }
 
 async function downloadLineMessageContent(messageId: string) {
-  const token = process.env.LINE_CHANNEL_ACCESS_TOKEN;
+  const token = (await getRuntimeSettings()).lineChannelAccessToken;
   if (!token) throw new Error("Missing LINE_CHANNEL_ACCESS_TOKEN");
 
   const response = await fetch(`https://api-data.line.me/v2/bot/message/${messageId}/content`, {

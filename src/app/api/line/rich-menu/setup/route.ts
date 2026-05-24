@@ -3,11 +3,13 @@ import { join } from "node:path";
 import { badRequest, ok, serverError } from "@/lib/api/response";
 import { listRecords, type Row } from "@/lib/supabase/server";
 import { linkLineRichMenu } from "@/lib/server/line";
+import { getRuntimeSettings } from "@/lib/server/appSettings";
+import type { AppPublicSettings } from "@/lib/settings/schema";
 
 const RICH_MENU_SIZE = { width: 1200, height: 405 };
 const MAX_RICH_MENU_IMAGE_BYTES = 1024 * 1024;
 const RICH_MENU_IMAGE_CONTENT_TYPE = "image/png";
-const LEGACY_RICH_MENU_NAMES = new Set(["Classroom Finance Menu"]);
+const LEGACY_RICH_MENU_NAMES = new Set(["Classroom Finance Menu", "Classroom Finance Register Menu", "Classroom Finance Student Menu"]);
 
 type RichMenuDefinition = {
   key: "register" | "registered";
@@ -24,51 +26,54 @@ type LineRichMenuSummary = {
   name?: string;
 };
 
-const richMenus: RichMenuDefinition[] = [
-  {
+function buildRichMenus(settings: AppPublicSettings): RichMenuDefinition[] {
+  return [{
     key: "register",
-    name: "Classroom Finance Register Menu",
+    name: settings.lineRegisterRichMenuName,
     imagePath: join(process.cwd(), "public/line/rich-menu-register.png"),
     areas: [
       {
         bounds: { x: 0, y: 0, width: RICH_MENU_SIZE.width, height: RICH_MENU_SIZE.height },
-        action: { type: "message", label: "ลงทะเบียน", text: "ลงทะเบียน" },
+        action: { type: "message", label: settings.lineRegisterAction.label, text: settings.lineRegisterAction.text },
       },
     ],
   },
   {
     key: "registered",
-    name: "Classroom Finance Student Menu",
+    name: settings.lineRegisteredRichMenuName,
     imagePath: join(process.cwd(), "public/line/rich-menu-registered.png"),
     areas: [
       {
         bounds: { x: 0, y: 0, width: 300, height: RICH_MENU_SIZE.height },
-        action: { type: "message", label: "ชำระเงิน", text: "ชำระเงิน" },
+        action: { type: "message", label: settings.linePayAction.label, text: settings.linePayAction.text },
       },
       {
         bounds: { x: 300, y: 0, width: 300, height: RICH_MENU_SIZE.height },
-        action: { type: "message", label: "สถานะ", text: "เมนูสถานะ" },
+        action: { type: "message", label: settings.lineStatusAction.label, text: settings.lineStatusAction.text },
       },
       {
         bounds: { x: 600, y: 0, width: 300, height: RICH_MENU_SIZE.height },
-        action: { type: "message", label: "ประวัติ", text: "เมนูประวัติ" },
+        action: { type: "message", label: settings.lineHistoryAction.label, text: settings.lineHistoryAction.text },
       },
       {
         bounds: { x: 900, y: 0, width: 300, height: RICH_MENU_SIZE.height },
-        action: { type: "message", label: "ยอดรวม", text: "เมนูยอดรวม" },
+        action: { type: "message", label: settings.lineTotalAction.label, text: settings.lineTotalAction.text },
       },
     ],
-  },
-];
+  }];
+}
 
 export async function POST() {
   const createdMenuIds: string[] = [];
+  let token: string | undefined;
 
   try {
-    const token = process.env.LINE_CHANNEL_ACCESS_TOKEN;
+    const settings = await getRuntimeSettings();
+    token = settings.lineChannelAccessToken;
     if (!token) return badRequest("Missing LINE_CHANNEL_ACCESS_TOKEN");
+    const richMenus = buildRichMenus(settings);
 
-    await deleteExistingProjectMenus(token);
+    await deleteExistingProjectMenus(token, richMenus);
 
     const result: Record<RichMenuDefinition["key"], string> = {
       register: "",
@@ -76,7 +81,7 @@ export async function POST() {
     };
 
     for (const menu of richMenus) {
-      const richMenuId = await createRichMenu(token, menu);
+      const richMenuId = await createRichMenu(token, menu, settings.lineRichMenuChatBarText);
       createdMenuIds.push(richMenuId);
       await uploadRichMenuImage(token, richMenuId, menu.imagePath);
       result[menu.key] = richMenuId;
@@ -92,12 +97,12 @@ export async function POST() {
       note: "Register menu is default. Registered students are linked to the student menu.",
     });
   } catch (error) {
-    await Promise.all(createdMenuIds.map((richMenuId) => deleteRichMenu(process.env.LINE_CHANNEL_ACCESS_TOKEN, richMenuId)));
+    await Promise.all(createdMenuIds.map((richMenuId) => deleteRichMenu(token, richMenuId)));
     return serverError(error);
   }
 }
 
-async function createRichMenu(token: string, menu: RichMenuDefinition) {
+async function createRichMenu(token: string, menu: RichMenuDefinition, chatBarText: string) {
   const response = await fetch("https://api.line.me/v2/bot/richmenu", {
     method: "POST",
     headers: {
@@ -108,7 +113,7 @@ async function createRichMenu(token: string, menu: RichMenuDefinition) {
       size: RICH_MENU_SIZE,
       selected: true,
       name: menu.name,
-      chatBarText: "เมนูการเงิน",
+      chatBarText,
       areas: menu.areas,
     }),
   });
@@ -141,7 +146,7 @@ async function uploadRichMenuImage(token: string, richMenuId: string, imagePath:
   }
 }
 
-async function deleteExistingProjectMenus(token: string) {
+async function deleteExistingProjectMenus(token: string, richMenus: RichMenuDefinition[]) {
   const response = await fetch("https://api.line.me/v2/bot/richmenu/list", {
     headers: { authorization: `Bearer ${token}` },
   });

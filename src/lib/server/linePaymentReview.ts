@@ -4,6 +4,7 @@ import { createRecord, getRecord, getSupabaseAdmin, type Row } from "@/lib/supab
 import { mapLinePaymentRequest, mapTransaction } from "@/lib/supabase/mappers";
 import { pushLineText } from "@/lib/server/line";
 import { deleteSlipImages } from "@/lib/server/slipStorage";
+import { lineMessage } from "@/lib/server/appSettings";
 
 const REVIEWABLE_STATUSES = ["pending_slip_review", "pending_review", "cash_pending"];
 const MAX_APPROVED_SLIPS_PER_LINE_USER = 6;
@@ -112,10 +113,7 @@ export async function approveLinePaymentRequest({
   await deleteCompletedPaymentRequest(requestId);
 
   if (notifyStudent) {
-    await pushLineText(paymentRequest.line_user_id, [
-      "สลิปผ่านแล้วครับ ✅",
-      "ชำระเงินเรียบร้อย ขอบคุณมากครับ 🙌",
-    ].join("\n"));
+    await pushLineText(paymentRequest.line_user_id, await lineMessage("lineApproved"));
   }
 
   return {
@@ -153,11 +151,7 @@ export async function rejectLinePaymentRequest({
   if (!data) throw new Error("Only pending payment requests can be rejected");
 
   const request = mapLinePaymentRequest(data);
-  await pushLineText(request.line_user_id, [
-    "สลิปยังไม่ผ่านการตรวจสอบนะครับ 😅",
-    `เหตุผล: ${cleanReason}`,
-    "กรุณาส่งสลิปใหม่อีกครั้งได้เลย",
-  ].join("\n"));
+  await pushLineText(request.line_user_id, await lineMessage("lineRejected", { reason: cleanReason }));
 
   await deleteRejectedSlipImage(request.slip_pathname);
   await deleteCompletedPaymentRequest(request.id);

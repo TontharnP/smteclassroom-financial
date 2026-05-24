@@ -1,11 +1,12 @@
 import "server-only";
 
+import { getRuntimeSettings } from "@/lib/server/appSettings";
 import { getSupabaseAdmin } from "@/lib/supabase/server";
 
 const DEFAULT_SLIP_BUCKET = "payment-slips";
 
-export function getSlipBucketName() {
-  return process.env.SUPABASE_SLIP_BUCKET || DEFAULT_SLIP_BUCKET;
+export async function getSlipBucketName() {
+  return (await getRuntimeSettings()).supabaseSlipBucket || DEFAULT_SLIP_BUCKET;
 }
 
 export function appSlipUrl(pathname: string) {
@@ -23,7 +24,7 @@ export async function storeSlipImage({
 }) {
   const extension = extensionFromContentType(contentType);
   const pathname = `${requestId}-${Date.now()}${extension}`;
-  const bucket = getSlipBucketName();
+  const bucket = await getSlipBucketName();
   const { error } = await getSupabaseAdmin()
     .storage
     .from(bucket)
@@ -43,7 +44,7 @@ export async function storeSlipImage({
 export async function downloadSlipImage(pathname: string) {
   const { data, error } = await getSupabaseAdmin()
     .storage
-    .from(getSlipBucketName())
+    .from(await getSlipBucketName())
     .download(pathname);
 
   if (error) throw error;
@@ -56,7 +57,7 @@ export async function deleteSlipImages(pathnames: string[]) {
 
   const { error } = await getSupabaseAdmin()
     .storage
-    .from(getSlipBucketName())
+    .from(await getSlipBucketName())
     .remove(cleanPathnames);
 
   if (error) throw error;

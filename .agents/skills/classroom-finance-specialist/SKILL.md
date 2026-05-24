@@ -30,7 +30,7 @@ When data crosses the API/database boundary, check `src/lib/supabase/mappers.ts`
 
 Preserve secrets. Mention environment variable names only; never print real values from `.env.local`.
 
-After code changes, run the narrowest useful verification. Usually start with `npm run lint`; run `npm run build` for routes, server/client boundaries, dependency changes, schema-linked types, or deployment fixes.
+After code changes, run the narrowest useful verification. Usually start with `npm run lint`; run `npx next build --webpack` for routes, server/client boundaries, dependency changes, schema-linked types, or deployment fixes.
 
 ## Product Priorities
 

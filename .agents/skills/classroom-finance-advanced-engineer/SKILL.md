@@ -37,7 +37,7 @@ Make additive changes where possible. Split risky work into migration, compatibi
 
 Prefer existing local patterns over new abstractions. Add an abstraction only when it reduces repeated cross-layer logic or protects a financial/data invariant.
 
-Run `npm run lint` after implementation. Run `npm run build` for any route, migration-linked type, server/client boundary, deployment, dependency, or release-critical change.
+Run `npm run lint` after implementation. Run `npx next build --webpack` for any route, migration-linked type, server/client boundary, deployment, dependency, or release-critical change.
 
 ## Stop Conditions
 

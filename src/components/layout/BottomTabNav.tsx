@@ -7,7 +7,10 @@ export default function BottomTabNav() {
   const pathname = usePathname();
   return (
     <nav className="fixed bottom-2 left-2 right-2 z-40 glass-nav rounded-[22px] border md:hidden safe-bottom min-[390px]:left-3 min-[390px]:right-3">
-      <ul className="mx-auto grid max-w-screen-sm grid-cols-5 gap-0.5 px-1 py-1 min-[390px]:gap-1 min-[390px]:px-1.5">
+      <ul
+        className="mx-auto grid max-w-screen-sm gap-0.5 px-1 py-1 min-[390px]:gap-1 min-[390px]:px-1.5"
+        style={{ gridTemplateColumns: `repeat(${NAV_ITEMS.length}, minmax(0, 1fr))` }}
+      >
         {NAV_ITEMS.map((item) => {
           const active = pathname?.startsWith(item.href);
           const Icon = item.icon;
