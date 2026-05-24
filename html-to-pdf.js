@@ -5,16 +5,20 @@
  * Run: node html-to-pdf.js
  */
 
-const fs = require('fs');
-const path = require('path');
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 async function convertHTMLToPDF() {
   try {
     // Try using puppeteer if available
     let puppeteer;
     try {
-      puppeteer = require('puppeteer');
-    } catch (e) {
+      puppeteer = await import('puppeteer');
+    } catch {
       console.log('📦 ติดตั้ง puppeteer...');
       console.log('   npm install puppeteer');
       console.log('');
@@ -36,7 +40,7 @@ async function convertHTMLToPDF() {
     }
 
     console.log('🔄 กำลังแปลงไฟล์ HTML เป็น PDF...');
-    const browser = await puppeteer.launch();
+    const browser = await puppeteer.default.launch();
     const page = await browser.newPage();
     
     await page.goto(`file://${htmlPath}`, {
